@@ -1,0 +1,2 @@
+# Over-Seer Python dependencies
+flask>=3.0

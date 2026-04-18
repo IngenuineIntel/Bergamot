@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Over-Seer — Bergamot Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Over-Seer</h1>
+    <div id="stats-bar">
+      <span>Events/s: <strong id="stat-eps">—</strong></span>
+      <span>Agents: <strong id="stat-agents">—</strong></span>
+      <span>Uptime: <strong id="stat-uptime">—</strong></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ── Events/sec sparkline ── -->
+    <section class="card full-width">
+      <h2>Events / second</h2>
+      <canvas id="eps-chart" height="80"></canvas>
+    </section>
+
+    <!-- ── Process table ── -->
+    <section class="card full-width">
+      <h2>Processes</h2>
+      <div class="table-wrap">
+        <table id="proc-table">
+          <thead>
+            <tr>
+              <th data-col="pid">PID</th>
+              <th data-col="ppid">PPID</th>
+              <th data-col="uid">UID</th>
+              <th data-col="comm">Command</th>
+              <th data-col="last_seen">Last&nbsp;seen (ns)</th>
+            </tr>
+          </thead>
+          <tbody id="proc-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── File opens + Network side-by-side ── -->
+    <section class="card half">
+      <h2>File Opens</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time (ns)</th><th>PID</th><th>Comm</th><th>Path</th></tr>
+          </thead>
+          <tbody id="open-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card half">
+      <h2>Network Connections</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time (ns)</th><th>PID</th><th>Comm</th><th>Destination</th></tr>
+          </thead>
+          <tbody id="net-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

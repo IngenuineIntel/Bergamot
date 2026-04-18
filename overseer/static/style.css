@@ -1,0 +1,120 @@
+/* style.css — Over-Seer dashboard */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --border:    #30363d;
+  --accent:    #58a6ff;
+  --text:      #c9d1d9;
+  --text-dim:  #8b949e;
+  --danger:    #f85149;
+  --success:   #3fb950;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 {
+  font-size: 18px;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+}
+
+#stats-bar {
+  display: flex;
+  gap: 24px;
+  color: var(--text-dim);
+}
+
+#stats-bar strong {
+  color: var(--text);
+}
+
+/* ── Layout ── */
+main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 24px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.card h2 {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+}
+
+.full-width { flex: 1 1 100%; }
+.half       { flex: 1 1 calc(50% - 8px); min-width: 320px; }
+
+/* ── Table ── */
+.table-wrap {
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-dim);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+thead th:hover { color: var(--accent); }
+
+tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+
+tbody td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Sparkline canvas ── */
+#eps-chart { width: 100% !important; }
