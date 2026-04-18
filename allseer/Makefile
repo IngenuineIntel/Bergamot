@@ -12,11 +12,17 @@ all_seer_kmod-objs := allseer.o hooks.o
 
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 PWD   := $(shell pwd)
+BUILD_DIR := $(PWD)/build
 
 ccflags-y += $(CFLAGS_EXTRA)
 
 all:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	@mkdir -p $(BUILD_DIR)
+	$(MAKE) -C $(KDIR) M=$(PWD) MO=$(BUILD_DIR) modules
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	@if [ -d "$(BUILD_DIR)" ]; then \
+		$(MAKE) -C $(KDIR) M=$(PWD) MO=$(BUILD_DIR) clean; \
+	fi
+	@rm -rf $(BUILD_DIR)
+	@rm -f Module.symvers modules.order *.mod *.mod.c *.o *.ko .*.cmd

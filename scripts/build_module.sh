@@ -10,4 +10,4 @@ cd "$(dirname "$0")/.."
 
 echo "[build] Compiling All-Seer kernel module..."
 make -C allseer CFLAGS_EXTRA="${CFLAGS_EXTRA:-}"
-echo "[build] Done: allseer/all_seer_kmod.ko"
+echo "[build] Done: allseer/build/all_seer_kmod.ko"

@@ -144,7 +144,7 @@ int as_probe_connect(struct kprobe *p, struct pt_regs *regs)
     struct sock *sk = (struct sock *)(regs->di);
     char arg[64];
     u16  dport;
-    u8   family;
+    u16  family;
 
     AS_HOOK_GUARD();
 

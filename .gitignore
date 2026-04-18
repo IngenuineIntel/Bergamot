@@ -1,0 +1,6 @@
+# Python venvs
+overseer/env
+underseer/env
+
+# Leftover build artifacts.
+allseer/build

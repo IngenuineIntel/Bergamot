@@ -39,6 +39,7 @@ import time
 OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "")
 OVERSEER_PORT    = int(os.environ.get("OVERSEER_PORT", "9000"))
 PROC_PATH        = os.environ.get("PROC_PATH", "/proc/all_seer")
+PROC_CTL_PATH    = os.environ.get("PROC_CTL_PATH", "/proc/all_seer_ctl")
 POLL_INTERVAL_S  = int(os.environ.get("POLL_INTERVAL_MS", "100")) / 1000.0
 BATCH_MAX        = int(os.environ.get("BATCH_MAX", "64"))
 RECONNECT_MAX_S  = int(os.environ.get("RECONNECT_MAX_S", "30"))
@@ -50,6 +51,45 @@ if not OVERSEER_HOST:
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "exec", "connect")
+
+
+def _write_ctl(command: str) -> None:
+    with open(PROC_CTL_PATH, "w") as ctl:
+        ctl.write(command)
+
+
+def register_identity() -> bool:
+    """
+    Claim owner lease and install self-filter for this task group.
+
+    Returns True when both operations succeed. Failures are non-fatal; caller
+    may retry later because owner lease can be temporarily held by an old PID.
+    """
+    tgid = os.getpid()  # group leader pid == tgid for this process
+    ok = True
+
+    try:
+        _write_ctl(f"claim_owner_tgid {tgid}\n")
+        print(f"[under-seer] owner lease claimed tgid={tgid}", flush=True)
+    except FileNotFoundError:
+        print(f"[under-seer] {PROC_CTL_PATH} not found", flush=True)
+        return False
+    except PermissionError:
+        print(f"[under-seer] permission denied writing {PROC_CTL_PATH}",
+              flush=True)
+        return False
+    except OSError as exc:
+        print(f"[under-seer] owner claim failed: {exc}", flush=True)
+        ok = False
+
+    try:
+        _write_ctl(f"filter_add_tgid {tgid}\n")
+    except OSError as exc:
+        print(f"[under-seer] self-filter registration failed: {exc}",
+              flush=True)
+        ok = False
+
+    return ok
 
 
 def parse_line(line: str) -> dict | None:
@@ -149,9 +189,12 @@ class Sender:
 def main():
     sender = Sender(OVERSEER_HOST, OVERSEER_PORT)
     sender.connect()
+    register_identity()
 
     print(f"[under-seer] polling {PROC_PATH} every "
           f"{POLL_INTERVAL_S * 1000:.0f}ms", flush=True)
+
+    last_claim_retry = 0.0
 
     while True:
         # ── Read all available events from the proc file ─────────────────
@@ -171,8 +214,14 @@ def main():
             time.sleep(POLL_INTERVAL_S)
             continue
         except FileNotFoundError:
-            print(f"[under-seer] {PROC_PATH} not found — "
-                  "is the kernel module loaded?", file=sys.stderr, flush=True)
+            now = time.monotonic()
+            if now - last_claim_retry >= 1.0:
+                register_identity()
+                last_claim_retry = now
+
+            print(f"[under-seer] {PROC_PATH} unavailable — "
+                  "lease not claimed yet or module not loaded",
+                  file=sys.stderr, flush=True)
             time.sleep(5)
             continue
         except OSError as exc:

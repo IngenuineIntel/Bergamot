@@ -13,7 +13,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 PASS() { echo -e "${GREEN}[PASS]${NC} $*"; }
 FAIL() { echo -e "${RED}[FAIL]${NC} $*"; exit 1; }
 
-KO="allseer/all_seer_kmod.ko"
+KO="allseer/build/all_seer_kmod.ko"
 PROC="/proc/all_seer"
 CTL="/proc/all_seer_ctl"
 

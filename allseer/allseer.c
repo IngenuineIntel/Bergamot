@@ -59,39 +59,124 @@ static DEFINE_SPINLOCK(as_fifo_lock);
 atomic_t as_ready      = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
-/* ── Exclusive reader state ──────────────────────────────────────────── */
-/* Only the first process to open /proc/all_seer becomes the owner.      */
-/* We store both PID and task start_time to guard against PID reuse.     */
+/* ── Owner lease state ───────────────────────────────────────────────── */
+/*
+ * Ownership is explicitly claimed through /proc/all_seer_ctl with:
+ *   claim_owner_tgid <tgid>
+ *
+ * Once claimed, only that TGID may open/read /proc/all_seer.  All other
+ * callers see -ENOENT ("file disappears" semantics).
+ */
+static atomic_t   as_owner_tgid        = ATOMIC_INIT(0);
+static atomic64_t as_owner_start_time  = ATOMIC64_INIT(0);
 
-static atomic_t  as_owner_pid        = ATOMIC_INIT(0);
-static atomic64_t as_owner_start_time = ATOMIC64_INIT(0);
-
-/* Returns true if 'current' is the established owner. */
-static inline bool as_is_owner(void)
+static void as_clear_owner_lease(void)
 {
-    return (atomic_read(&as_owner_pid) == (int)current->pid) &&
-           (atomic64_read(&as_owner_start_time) == (s64)current->start_time);
-}
-
-/* Try to claim ownership atomically.  Returns true if we won the race. */
-static bool as_try_claim(void)
-{
-    int zero = 0;
-    if (!atomic_cmpxchg(&as_owner_pid, 0, (int)current->pid)) {
-        atomic64_set(&as_owner_start_time, (s64)current->start_time);
-        pr_info("all_seer: owner claimed by pid=%d comm=%s\n",
-                current->pid, current->comm);
-        return true;
-    }
-    return false;
-}
-
-/* Release ownership (called from .release when owner closes the file). */
-static void as_release_owner(void)
-{
-    pr_info("all_seer: owner released by pid=%d\n", current->pid);
     atomic64_set(&as_owner_start_time, 0);
-    atomic_set(&as_owner_pid, 0);
+    atomic_set(&as_owner_tgid, 0);
+}
+
+static bool as_current_is_owner(void)
+{
+    pid_t owner_tgid = atomic_read(&as_owner_tgid);
+    u64 owner_start = (u64)atomic64_read(&as_owner_start_time);
+    u64 my_start = (u64)current->group_leader->start_time;
+
+    return owner_tgid != 0 &&
+           owner_tgid == current->tgid &&
+           owner_start == my_start;
+}
+
+/* ── TGID filter state ───────────────────────────────────────────────── */
+#define AS_TGID_FILTER_MAX 64
+
+struct as_tgid_filter {
+    pid_t tgid;
+    u64 leader_start_time;
+};
+
+static struct as_tgid_filter as_tgid_filters[AS_TGID_FILTER_MAX];
+static int as_tgid_filter_count;
+static DEFINE_SPINLOCK(as_tgid_filter_lock);
+static atomic64_t as_dropped_by_filter = ATOMIC64_INIT(0);
+
+static bool as_tgid_is_filtered(void)
+{
+    int i;
+    bool matched = false;
+    u64 cur_start = (u64)current->group_leader->start_time;
+
+    spin_lock(&as_tgid_filter_lock);
+    for (i = 0; i < as_tgid_filter_count; i++) {
+        if (as_tgid_filters[i].tgid == current->tgid &&
+            as_tgid_filters[i].leader_start_time == cur_start) {
+            matched = true;
+            break;
+        }
+    }
+    spin_unlock(&as_tgid_filter_lock);
+
+    return matched;
+}
+
+static int as_filter_add_tgid(pid_t tgid)
+{
+    int i;
+
+    /* Keep filter registration self-scoped for debug/agent use. */
+    if (tgid != current->tgid)
+        return -EPERM;
+
+    spin_lock(&as_tgid_filter_lock);
+    for (i = 0; i < as_tgid_filter_count; i++) {
+        if (as_tgid_filters[i].tgid == tgid &&
+            as_tgid_filters[i].leader_start_time ==
+                (u64)current->group_leader->start_time) {
+            spin_unlock(&as_tgid_filter_lock);
+            return 0;
+        }
+    }
+
+    if (as_tgid_filter_count >= AS_TGID_FILTER_MAX) {
+        spin_unlock(&as_tgid_filter_lock);
+        return -ENOSPC;
+    }
+
+    as_tgid_filters[as_tgid_filter_count].tgid = tgid;
+    as_tgid_filters[as_tgid_filter_count].leader_start_time =
+        (u64)current->group_leader->start_time;
+    as_tgid_filter_count++;
+    spin_unlock(&as_tgid_filter_lock);
+
+    return 0;
+}
+
+static int as_filter_del_tgid(pid_t tgid)
+{
+    int i, j;
+    int removed = 0;
+
+    spin_lock(&as_tgid_filter_lock);
+    for (i = 0; i < as_tgid_filter_count; ) {
+        if (as_tgid_filters[i].tgid == tgid) {
+            for (j = i; j < as_tgid_filter_count - 1; j++)
+                as_tgid_filters[j] = as_tgid_filters[j + 1];
+            as_tgid_filter_count--;
+            removed++;
+            continue;
+        }
+        i++;
+    }
+    spin_unlock(&as_tgid_filter_lock);
+
+    return removed > 0 ? 0 : -ENOENT;
+}
+
+static void as_filter_clear(void)
+{
+    spin_lock(&as_tgid_filter_lock);
+    as_tgid_filter_count = 0;
+    spin_unlock(&as_tgid_filter_lock);
 }
 
 /* ── as_emit_event — called from hooks.c ────────────────────────────── */
@@ -103,6 +188,18 @@ void as_emit_event(u8 type, const char *arg)
     /* Drop events until module init completes and collection is active. */
     if (!atomic_read(&as_ready) || !atomic_read(&as_collecting))
         return;
+
+#if AS_DEBUG_IGNORE_COMM
+    /* Debug-only name filter from hooks_config.h. */
+    if (strcmp(current->comm, AS_DEBUG_IGNORE_COMM_NAME) == 0)
+        return;
+#endif
+
+    /* Suppress events from explicitly ignored task groups. */
+    if (as_tgid_is_filtered()) {
+        atomic64_inc(&as_dropped_by_filter);
+        return;
+    }
 
     ev.timestamp_ns = ktime_get_ns();
     ev.pid          = current->pid;
@@ -118,7 +215,8 @@ void as_emit_event(u8 type, const char *arg)
     /* If the fifo is full, drop the oldest entry to make room. */
     if (kfifo_is_full(&as_fifo)) {
         struct as_event discard;
-        kfifo_get(&as_fifo, &discard);
+        bool dropped = kfifo_get(&as_fifo, &discard);
+        (void)dropped;
     }
     kfifo_put(&as_fifo, ev);
     spin_unlock_irqrestore(&as_fifo_lock, flags);
@@ -159,18 +257,15 @@ static int as_proc_open(struct inode *inode, struct file *file)
         return -ENOMEM;
 
     /*
-     * If no owner is set, try to claim ownership.
-     * If an owner is already set but it's us, we're allowed (re-open).
-     * Anyone else gets an unauthorized handle — their reads return empty.
+     * Strict owner lease mode:
+     *   - only claimed owner TGID can open/read
+     *   - everyone else sees ENOENT
      */
-    if (atomic_read(&as_owner_pid) == 0) {
-        as_try_claim();
-        priv->authorized = true;
-    } else if (as_is_owner()) {
+    if (as_current_is_owner()) {
         priv->authorized = true;
     } else {
-        priv->authorized = false;
-        /* Do NOT return an error — caller must not know an owner exists. */
+        kfree(priv);
+        return -ENOENT;
     }
 
     file->private_data = priv;
@@ -182,8 +277,6 @@ static int as_proc_release(struct inode *inode, struct file *file)
     struct as_file_priv *priv = file->private_data;
 
     if (priv) {
-        if (priv->authorized && as_is_owner())
-            as_release_owner();
         kfree(priv);
         file->private_data = NULL;
     }
@@ -211,7 +304,10 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     unsigned long flags;
 
     if (!priv || !priv->authorized)
-        return 0;
+        return -ENOENT;
+
+    if (!as_current_is_owner())
+        return -ENOENT;
 
     while (count > 0) {
         int len;
@@ -254,7 +350,7 @@ static const struct proc_ops as_proc_ops = {
     .proc_open    = as_proc_open,
     .proc_read    = as_proc_read,
     .proc_release = as_proc_release,
-    .proc_lseek   = no_llseek,
+    .proc_lseek   = noop_llseek,
 };
 
 /* ── /proc/all_seer_ctl — control interface ──────────────────────────── */
@@ -265,6 +361,7 @@ static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
     char cmd[32];
     size_t len = min(count, sizeof(cmd) - 1);
     unsigned long flags;
+    int tgid;
 
     if (copy_from_user(cmd, ubuf, len))
         return -EFAULT;
@@ -275,7 +372,58 @@ static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
                        cmd[len-1] == ' '))
         cmd[--len] = '\0';
 
-    if (strcmp(cmd, "stop") == 0) {
+    if (sscanf(cmd, "claim_owner_tgid %d", &tgid) == 1) {
+        u64 start_time = 0;
+        pid_t old_owner;
+
+        if (tgid <= 0)
+            return -EINVAL;
+
+        /* Only self-claims are accepted. */
+        if (tgid != current->tgid)
+            return -EPERM;
+
+        old_owner = atomic_read(&as_owner_tgid);
+        if (old_owner != 0 && old_owner != tgid)
+            pr_info("all_seer: owner lease takeover old_tgid=%d new_tgid=%d\n",
+                    old_owner, tgid);
+
+        start_time = (u64)current->group_leader->start_time;
+
+        atomic_set(&as_owner_tgid, tgid);
+        atomic64_set(&as_owner_start_time, (s64)start_time);
+        pr_info("all_seer: owner lease claimed tgid=%d comm=%s\n",
+                tgid, current->comm);
+
+    } else if (sscanf(cmd, "filter_add_tgid %d", &tgid) == 1) {
+        int ret;
+
+        if (tgid <= 0)
+            return -EINVAL;
+
+        ret = as_filter_add_tgid((pid_t)tgid);
+        if (ret)
+            return ret;
+
+        pr_info("all_seer: filter added tgid=%d\n", tgid);
+
+    } else if (sscanf(cmd, "filter_del_tgid %d", &tgid) == 1) {
+        int ret;
+
+        if (tgid <= 0)
+            return -EINVAL;
+
+        ret = as_filter_del_tgid((pid_t)tgid);
+        if (ret)
+            return ret;
+
+        pr_info("all_seer: filter removed tgid=%d\n", tgid);
+
+    } else if (strcmp(cmd, "filter_clear") == 0) {
+        as_filter_clear();
+        pr_info("all_seer: all filters cleared\n");
+
+    } else if (strcmp(cmd, "stop") == 0) {
         atomic_set(&as_collecting, 0);
         pr_info("all_seer: collection stopped via ctl\n");
 
@@ -288,10 +436,9 @@ static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
         spin_lock_irqsave(&as_fifo_lock, flags);
         kfifo_reset(&as_fifo);
         spin_unlock_irqrestore(&as_fifo_lock, flags);
-        /* Release reader lock so Under-Seer can re-claim after restart */
-        atomic64_set(&as_owner_start_time, 0);
-        atomic_set(&as_owner_pid, 0);
-        pr_info("all_seer: buffer reset and reader lock cleared via ctl\n");
+        /* Release owner lease so a new Under-Seer can claim after reset. */
+        as_clear_owner_lease();
+        pr_info("all_seer: buffer reset and owner lease cleared via ctl\n");
 
     } else {
         pr_warn("all_seer: unknown ctl command: %s\n", cmd);
@@ -304,8 +451,36 @@ static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
 static ssize_t as_ctl_read(struct file *file, char __user *ubuf,
                             size_t count, loff_t *ppos)
 {
-    const char *status = atomic_read(&as_collecting) ? "running\n" : "stopped\n";
-    size_t len = strlen(status);
+    char status[1024];
+    size_t len;
+    int i;
+    ssize_t written;
+    pid_t owner_tgid;
+    u64 owner_start;
+
+    owner_tgid = atomic_read(&as_owner_tgid);
+    owner_start = (u64)atomic64_read(&as_owner_start_time);
+
+    written = scnprintf(status, sizeof(status),
+                        "%s\nowner_tgid=%d owner_start=%llu\n"
+                        "filters=%d dropped_by_filter=%llu\n",
+                        atomic_read(&as_collecting) ? "running" : "stopped",
+                        owner_tgid,
+                        (unsigned long long)owner_start,
+                        as_tgid_filter_count,
+                        (unsigned long long)atomic64_read(&as_dropped_by_filter));
+
+    spin_lock(&as_tgid_filter_lock);
+    for (i = 0; i < as_tgid_filter_count && written < sizeof(status); i++) {
+        written += scnprintf(status + written, sizeof(status) - written,
+                             "filter[%d]=tgid:%d start:%llu\n",
+                             i,
+                             as_tgid_filters[i].tgid,
+                             (unsigned long long)as_tgid_filters[i].leader_start_time);
+    }
+    spin_unlock(&as_tgid_filter_lock);
+
+    len = min_t(size_t, (size_t)written, sizeof(status));
 
     if (*ppos >= (loff_t)len)
         return 0;
@@ -324,7 +499,7 @@ static ssize_t as_ctl_read(struct file *file, char __user *ubuf,
 static const struct proc_ops as_ctl_ops = {
     .proc_read    = as_ctl_read,
     .proc_write   = as_ctl_write,
-    .proc_lseek   = no_llseek,
+    .proc_lseek   = noop_llseek,
 };
 
 static struct proc_dir_entry *as_ctl_entry;
@@ -359,7 +534,7 @@ static struct kprobe as_kprobes[] = {
 #endif
 #if AS_HOOK_EXEC
     {
-        .symbol_name = "do_execveat_common",
+        .symbol_name = "__x64_sys_execveat",
         .pre_handler = as_probe_execve,
     },
 #endif
@@ -411,6 +586,8 @@ static int __init allseer_init(void)
      * Mark the module as ready AFTER all kprobes are registered.
      * Hooks will silently drop events until this flag is set.
      */
+    as_filter_clear();
+    as_clear_owner_lease();
     atomic_set(&as_ready, 1);
 
     pr_info("all_seer: loaded (%d hook(s) active)\n", as_num_probes);

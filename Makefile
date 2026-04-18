@@ -14,7 +14,7 @@
 .PHONY: build clean load unload run-underseer run-overseer
 
 MODULE_DIR := allseer
-MODULE_KO  := $(MODULE_DIR)/all_seer_kmod.ko
+MODULE_KO  := $(MODULE_DIR)/build/all_seer_kmod.ko
 
 build:
 	$(MAKE) -C $(MODULE_DIR) CFLAGS_EXTRA="$(CFLAGS_EXTRA)"

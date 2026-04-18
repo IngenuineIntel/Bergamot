@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-KO="allseer/all_seer_kmod.ko"
+KO="allseer/build/all_seer_kmod.ko"
 
 if [ ! -f "$KO" ]; then
   echo "[load] Module not built yet. Run scripts/build_module.sh first."
