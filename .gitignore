@@ -4,3 +4,6 @@ underseer/env
 
 # Leftover build artifacts.
 allseer/build
+
+# __pycache__ directories
+**/__pycache__/
