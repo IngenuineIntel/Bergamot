@@ -225,8 +225,10 @@ void as_emit_event(enum as_event_type type, const char *arg)
 }
 EXPORT_SYMBOL(as_emit_event);
 
-/* ── PROCFS INTERFACE ─────────────────────────────────────── */
-static const char * const as_type_str[AS_TYPE_MAX] = {
+
+/* ── PROCFS INTERFACE ───────────────────────────────────────────────────── */
+
+static const char * const as_type_str[] = {
     [AS_TYPE_OPEN]    = "open",
     [AS_TYPE_FORK]    = "fork",
     [AS_TYPE_EXEC]    = "exec",
@@ -251,6 +253,7 @@ struct as_file_priv {
 
 static int as_proc_open(struct inode *inode, struct file *file)
 {
+    /* Responsible for allocating memory when registering proc files. */
     struct as_file_priv *priv;
 
     priv = kzalloc(sizeof(*priv), GFP_KERNEL);
@@ -275,6 +278,7 @@ static int as_proc_open(struct inode *inode, struct file *file)
 
 static int as_proc_release(struct inode *inode, struct file *file)
 {
+    /* Responsible for freeing up memory when unregistering proc files. */
     struct as_file_priv *priv = file->private_data;
 
     if (priv) {
@@ -284,20 +288,25 @@ static int as_proc_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-/*
- * Custom read implementation: for the authorized owner we drain and
- * format the kfifo directly into the user buffer. Non-owners get 0
- * bytes, identical to an empty file.
- *
- * Procfs line contract emitted to Under-Seer:
- *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
- *
- * Under-Seer maps these fields into JSON keys:
- *   ts, pid, ppid, uid, type, comm, arg
- */
-static ssize_t as_proc_read(struct file *file, char __user *ubuf,
+
+/* ─── /proc/all_seer ─── */
+
+static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
                              size_t count, loff_t *ppos)
 {
+    /* Event handler for when `/proc/all_seer` is read.
+     *
+     * Custom read implementation: for the authorized owner we drain and
+     * format the kfifo directly into the user buffer. Non-owners get 0
+     * bytes, identical to an empty file.
+     *
+     * Procfs line contract emitted to Under-Seer:
+     *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
+     *
+     * Under-Seer maps these fields into JSON keys:
+     *   ts, pid, ppid, uid, type, comm, arg
+     */
+
     struct as_file_priv *priv = file->private_data;
     struct as_event ev;
     char line[384];
@@ -347,18 +356,20 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     return total;
 }
 
-static const struct proc_ops as_proc_ops = {
+static const struct proc_ops as_all_seer_ops = {
     .proc_open    = as_proc_open,
-    .proc_read    = as_proc_read,
+    .proc_read    = as_all_seer_read,
     .proc_release = as_proc_release,
     .proc_lseek   = noop_llseek,
 };
+static struct proc_dir_entry *as_all_seer_entry;
 
-/* ── /proc/all_seer_ctl — control interface ──────────────────────────── */
+/* ─── /proc/all_seer_ctl ─── */
 
-static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
+static ssize_t as_all_seer_ctl_write(struct file *file, const char __user *ubuf,
                              size_t count, loff_t *ppos)
 {
+    /* Event handler for when `/proc/all_seer_ctl` is written to */
     char cmd[32];
     size_t len = min(count, sizeof(cmd) - 1);
     unsigned long flags;
@@ -449,9 +460,10 @@ static ssize_t as_ctl_write(struct file *file, const char __user *ubuf,
     return (ssize_t)count;
 }
 
-static ssize_t as_ctl_read(struct file *file, char __user *ubuf,
+static ssize_t as_all_seer_ctl_read(struct file *file, char __user *ubuf,
                             size_t count, loff_t *ppos)
 {
+    /* Event handler for `/proc/all_seer_ctl` is read */
     char status[1024];
     size_t len;
     int i;
@@ -497,24 +509,29 @@ static ssize_t as_ctl_read(struct file *file, char __user *ubuf,
     return (ssize_t)len;
 }
 
-static const struct proc_ops as_ctl_ops = {
-    .proc_read    = as_ctl_read,
-    .proc_write   = as_ctl_write,
+static const struct proc_ops as_all_seer_ctl_ops = {
+    .proc_read    = as_all_seer_ctl_read,
+    .proc_write   = as_all_seer_ctl_write,
+    .proc_release = as_proc_release,
     .proc_lseek   = noop_llseek,
 };
+static struct proc_dir_entry *as_all_seer_ctl_entry;
 
-static struct proc_dir_entry *as_ctl_entry;
 
 /* ── KPROBE DECLARATIONS ────────────────────────────────────────────────── */
+
 #if AS_HOOK_OPEN
 extern int as_probe_openat2(struct kprobe *p, struct pt_regs *regs);
 #endif
+
 #if AS_HOOK_FORK
 extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 #endif
+
 #if AS_HOOK_EXEC
 extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
 #endif
+
 #if AS_HOOK_CONNECT
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
 #endif
@@ -547,50 +564,57 @@ static struct kprobe as_kprobes[] = {
 };
 
 static int as_num_probes = ARRAY_SIZE(as_kprobes);
-static struct proc_dir_entry *as_proc_entry;
 
-/* ── Module init / exit ──────────────────────────────────────────────── */
+
+/* ── INIT/EXIT ──────────────────────────────────────────────────────────── */
 
 static int __init allseer_init(void)
 {
     int ret, i;
 
-    as_proc_entry = proc_create("all_seer", 0400, NULL, &as_proc_ops);
-    if (!as_proc_entry) {
+    // registering /proc/all_seer
+    as_all_seer_entry = proc_create("all_seer", 0400, NULL, &as_all_seer_ops);
+    if (!as_all_seer_entry) {
         pr_err("all_seer: failed to create /proc/all_seer\n");
+        proc_remove(as_all_seer_entry);
+
         return -ENOMEM;
     }
 
-    as_ctl_entry = proc_create("all_seer_ctl", 0600, NULL, &as_ctl_ops);
-    if (!as_ctl_entry) {
+    // registering /proc/all_seer_ctl
+    as_all_seer_ctl_entry = proc_create("all_seer_ctl", 0600, NULL, &as_all_seer_ctl_ops);
+    if (!as_all_seer_ctl_entry) {
         pr_err("all_seer: failed to create /proc/all_seer_ctl\n");
-        proc_remove(as_proc_entry);
+        proc_remove(as_all_seer_ctl_entry);
+
         return -ENOMEM;
     }
 
+    // registering all kprobe hooks
     for (i = 0; i < as_num_probes; i++) {
         ret = register_kprobe(&as_kprobes[i]);
         if (ret < 0) {
             pr_err("all_seer: register_kprobe failed for %s (%d)\n",
                    as_kprobes[i].symbol_name, ret);
+
             /* Unwind already-registered probes */
             while (--i >= 0)
                 unregister_kprobe(&as_kprobes[i]);
-            proc_remove(as_ctl_entry);
-            proc_remove(as_proc_entry);
+
+            proc_remove(as_all_seer_ctl_entry);
+            proc_remove(as_all_seer_entry);
             return ret;
         }
     }
 
-    /*
-     * Mark the module as ready AFTER all kprobes are registered.
-     * Hooks will silently drop events until this flag is set.
-     */
+    // mark module as ready
     as_filter_clear();
     as_clear_owner_lease();
+
     atomic_set(&as_ready, 1);
 
     pr_info("all_seer: loaded (%d hook(s) active)\n", as_num_probes);
+
     return 0;
 }
 
@@ -604,11 +628,14 @@ static void __exit allseer_exit(void)
      */
     atomic_set(&as_ready, 0);
 
+    // unregistering kprobe hooks
     for (i = 0; i < as_num_probes; i++)
         unregister_kprobe(&as_kprobes[i]);
 
-    proc_remove(as_ctl_entry);
-    proc_remove(as_proc_entry);
+    // unregistering procfs entries
+    proc_remove(as_all_seer_entry);
+    proc_remove(as_all_seer_ctl_entry);
+
     pr_info("all_seer: unloaded\n");
 }
 

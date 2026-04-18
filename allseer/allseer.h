@@ -30,7 +30,6 @@ enum as_event_type {
     AS_TYPE_FORK,
     AS_TYPE_EXEC,
     AS_TYPE_CONNECT,
-    AS_TYPE_MAX // just to get the enum size
 };
 
 /* ── Event struct ────────────────────────────────────────────────────── */
