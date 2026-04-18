@@ -191,3 +191,4 @@ if __name__ == "__main__":
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)
+else: raise ImportError("Don't import me!!!")

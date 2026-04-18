@@ -32,8 +32,8 @@
 #include <linux/uaccess.h>
 #include <net/sock.h>
 
-#include "all_seer.h"
-#include "hooks_config.h"
+#include "allseer.h"
+#include "switches.h"
 
 /*
  * Guards declared in allseer.c.  Each handler checks them before doing
@@ -97,7 +97,7 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs)
 #endif /* AS_HOOK_FORK */
 
 
-/* ═══════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════════════════════
  * HOOK: exec  (do_execveat_common)
  * Captures execve / execveat.  We extract argv[0] from the filename
  * argument which holds the path of the image being loaded.
@@ -105,7 +105,7 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs)
  *   rdi = int fd, rsi = struct filename *filename,
  *   rdx = struct user_arg_ptr argv, rcx = struct user_arg_ptr envp,
  *   r8  = int flags
- * ═══════════════════════════════════════════════════════════════════════ */
+ * ═════════════════════════════════════════════════════════════════════════ */
 #if AS_HOOK_EXEC
 int as_probe_execve(struct kprobe *p, struct pt_regs *regs)
 {

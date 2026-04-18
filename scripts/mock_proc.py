@@ -115,3 +115,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+else: raise ImportError("Don't import me!!!")

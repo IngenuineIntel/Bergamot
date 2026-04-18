@@ -1,5 +1,7 @@
-/* allseer.c — All-Seer kernel module core
- *
+// allseer.c
+// All-Seer kernel module core
+
+/*
  * Component boundary: kernel -> userspace handoff.
  *   - hooks.c emits normalized events into kfifo via as_emit_event().
  *   - /proc/all_seer exposes drained kfifo events as one text line each.
@@ -36,8 +38,8 @@
 #include <linux/rcupdate.h>
 #include <linux/fs.h>
 
-#include "all_seer.h"
-#include "hooks_config.h"
+#include "allseer.h"
+#include "switches.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Bergamot");
@@ -180,7 +182,7 @@ static void as_filter_clear(void)
 }
 
 /* ── as_emit_event — called from hooks.c ────────────────────────────── */
-void as_emit_event(u8 type, const char *arg)
+void as_emit_event(enum as_event_type type, const char *arg)
 {
     struct as_event ev;
     unsigned long flags;
@@ -223,9 +225,8 @@ void as_emit_event(u8 type, const char *arg)
 }
 EXPORT_SYMBOL(as_emit_event);
 
-/* ── seq_file / procfs interface ─────────────────────────────────────── */
-
-static const char * const as_type_str[] = {
+/* ── PROCFS INTERFACE ─────────────────────────────────────── */
+static const char * const as_type_str[AS_TYPE_MAX] = {
     [AS_TYPE_OPEN]    = "open",
     [AS_TYPE_FORK]    = "fork",
     [AS_TYPE_EXEC]    = "exec",
@@ -504,8 +505,7 @@ static const struct proc_ops as_ctl_ops = {
 
 static struct proc_dir_entry *as_ctl_entry;
 
-/* ── kprobe declarations (handlers defined in hooks.c) ──────────────── */
-
+/* ── KPROBE DECLARATIONS ────────────────────────────────────────────────── */
 #if AS_HOOK_OPEN
 extern int as_probe_openat2(struct kprobe *p, struct pt_regs *regs);
 #endif

@@ -1,7 +1,7 @@
-/* all_seer.h — shared definitions for the All-Seer kernel module
- *
- * Included by both allseer.c (core) and hooks.c (kprobe handlers).
- *
+// allseer.h
+// 
+
+/*
  * Interface contract across components:
  *   hooks.c produces struct as_event via as_emit_event().
  *   allseer.c drains struct as_event to procfs line format:
@@ -19,17 +19,19 @@
  *   arg          -> arg
  */
 
-#ifndef ALL_SEER_H
-#define ALL_SEER_H
+#ifndef ALLSEER_H
+#define ALLSEER_H
 
 #include <linux/types.h>
 #include <linux/sched.h>
 
-/* ── Event type constants ────────────────────────────────────────────── */
-#define AS_TYPE_OPEN     0
-#define AS_TYPE_FORK     1
-#define AS_TYPE_EXEC     2
-#define AS_TYPE_CONNECT  3
+enum as_event_type {
+    AS_TYPE_OPEN = 0,
+    AS_TYPE_FORK,
+    AS_TYPE_EXEC,
+    AS_TYPE_CONNECT,
+    AS_TYPE_MAX // just to get the enum size
+};
 
 /* ── Event struct ────────────────────────────────────────────────────── */
 /* One instance is pushed into the kfifo for every intercepted event.    */
@@ -44,6 +46,6 @@ struct as_event {
 };
 
 /* ── Shared function declared in allseer.c, called from hooks.c ──────── */
-void as_emit_event(u8 type, const char *arg);
+void as_emit_event(enum as_event_type type, const char *arg);
 
-#endif /* ALL_SEER_H */
+#endif /* ALLSEER_H */
