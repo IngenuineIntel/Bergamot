@@ -48,9 +48,6 @@ overseer_run: overseer_prep_env
 overseer_test_active:
 	xdg-open http://$(FLASK_HOST):$(FLASK_PORT)
 
-overseer_test_workflow:
-	wget http://$(FLASK_HOST):$(FLASK_PORT) > /dev/null
-
 # universal tests
 universal_start: allseer_build allseer_test allseer_reload
 	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run & exit 0
@@ -59,4 +56,12 @@ universal_stop:
 	# the holy mother of one-liners
 	@for pid in `ps -ef | grep -E 'underseer|overseer' | awk '{print $$2}'`; do kill $$pid; done
 
-#universal_workflow: allseer_load allseer_test overseer_run_background underseer_run_background overseer_test_active
+# workflow formulas (less output more return codes)
+
+allseer_test_workflow: allseer_load
+	@[[ -e /proc/all_seer ]] || exit 1
+	@[[ -e /proc/all_seer_ctl ]] || exit 1
+	@$(MAKE) allseer_unload
+
+overseer_test_workflow:
+	wget http://$(FLASK_HOST):$(FLASK_PORT) > /dev/null
