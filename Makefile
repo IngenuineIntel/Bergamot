@@ -66,4 +66,4 @@ allseer_test_workflow: allseer_load
 	@$(MAKE) allseer_unload
 
 overseer_test_workflow:
-	wget http://$(FLASK_HOST):$(FLASK_PORT) > /dev/null
+	wget http://localhost:27960
