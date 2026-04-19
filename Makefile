@@ -1,6 +1,8 @@
 #!/usr/bin/make
 
 # vars
+SHELL := /bin/bash
+
 MODULE_DIR := ./allseer
 MODULE_KO  := $(MODULE_DIR)/build/allseer_kmod.ko
 
