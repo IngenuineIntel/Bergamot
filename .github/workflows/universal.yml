@@ -20,6 +20,12 @@ jobs:
     - name: Load/Test Allseer
       run: make allseer_test_workflow
 
+    - name: Setup Underseer Venv
+      run: make underseer_prep_env
+
+    - name: Setup Overseer Venv
+      run: make overseer_prep_env
+
     - name: Run Everything Simultaneously & Check for Webpage
       run:
         -|
