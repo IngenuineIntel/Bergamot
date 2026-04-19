@@ -28,25 +28,25 @@ Wire format (one JSON object per line):
    "type": "open"|"fork"|"exec"|"connect", "comm": "<str>", "arg": "<str>"}
 """
 
+import contextlib
 import json
 import os
 import socket
 import sys
 import time
 
-# ── Configuration ────────────────────────────────────────────────────────────
+# ── SWITCHES ─────────────────────────────────────────────────────────────── #
 
-OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "")
-OVERSEER_PORT    = int(os.environ.get("OVERSEER_PORT", "9000"))
-PROC_PATH        = os.environ.get("PROC_PATH", "/proc/all_seer")
-PROC_CTL_PATH    = os.environ.get("PROC_CTL_PATH", "/proc/all_seer_ctl")
-POLL_INTERVAL_S  = int(os.environ.get("POLL_INTERVAL_MS", "100")) / 1000.0
-BATCH_MAX        = int(os.environ.get("BATCH_MAX", "64"))
-RECONNECT_MAX_S  = int(os.environ.get("RECONNECT_MAX_S", "30"))
+OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
+try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
+except TypeError: OVERSEER_PORT = 12046
+PROC_PATH        = "/proc/all_seer"
+PROC_CTL_PATH    = "/proc/all_seer_ctl"
+POLL_INTERVAL_S  = 50
+BATCH_MAX        = 128
+RECONNECT_MAX_S  = 30
 
-if not OVERSEER_HOST:
-    print("ERROR: OVERSEER_HOST environment variable must be set.", file=sys.stderr)
-    sys.exit(1)
+POLL_INTERVAL_S /= 1000.0
 
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 

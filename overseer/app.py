@@ -18,11 +18,6 @@ Run:
   or:
     flask --app app run --host 0.0.0.0 --port 5000
 
-Environment variables:
-  TCP_PORT     Under-Seer ingest port  (default: 9000)
-  FLASK_HOST   Flask bind address      (default: 0.0.0.0)
-  FLASK_PORT   Flask HTTP port         (default: 5000)
-
 SSE stream (/api/stream):
   Browsers connect once and receive a continuous push of server-sent
   events.  Each SSE message is one JSON object on the "event" channel,
@@ -185,9 +180,12 @@ def api_stats():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    tcp_port  = int(os.environ.get("TCP_PORT",   "9000"))
-    http_host = os.environ.get("FLASK_HOST", "0.0.0.0")
-    http_port = int(os.environ.get("FLASK_PORT", "5000"))
+    #tcp_port  = int(os.environ.get("TCP_PORT",   "12046"))
+    #http_host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    #http_port = int(os.environ.get("FLASK_PORT", "27960"))
+    tcp_port = 12046
+    http_host = "0.0.0.0"
+    http_port = 27960
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)
