@@ -48,7 +48,7 @@ overseer_run: overseer_prep_env
 	$(OVERSEER_PYENV)/bin/python3 $(OVERSEER_DIR)/app.py
 
 overseer_test_active:
-	xdg-open http://$(FLASK_HOST):$(FLASK_PORT)
+	xdg-open http://localhost:27960
 
 # universal tests
 universal_start: allseer_build allseer_test allseer_reload
