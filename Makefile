@@ -53,7 +53,7 @@ overseer_test_workflow:
 
 # universal tests
 universal_start: allseer_build allseer_test allseer_reload
-	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run
+	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run & exit 0
 
 universal_stop:
 	# the holy mother of one-liners
