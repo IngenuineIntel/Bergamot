@@ -1,5 +1,5 @@
 // allseer.h
-// 
+// (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
 /*
  * Interface contract across components:

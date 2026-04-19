@@ -1,3 +1,24 @@
+#!/usr/bin/make
+
+MODULE_DIR := ./allseer
+MODULE_KO  := $(MODULE_DIR)/build/allseer_kmod.ko
+
+# allseer
+allseer_build:
+	$(MAKE) -C $(MODULE_DIR)
+
+allseer_clean:
+	$(MAKE) -C $(MODULE_DIR) clean
+
+allseer_load:
+	sudo insmod $(MODULE_KO)
+
+allseer_unload:
+	sudo rmmod allseer_kmod || true
+
+# underseer
+# TODO
+
 # Bergamot — top-level Makefile
 #
 # Targets:
@@ -11,34 +32,34 @@
 # Pass hook overrides through to the module build, e.g.:
 #   make build CFLAGS_EXTRA="-DAS_HOOK_FORK=0"
 
-.PHONY: build clean load unload run-underseer run-overseer
+#.PHONY: build clean load unload run-underseer run-overseer
 
-MODULE_DIR := allseer
-MODULE_KO  := $(MODULE_DIR)/build/all_seer_kmod.ko
+#MODULE_DIR := allseer
+#MODULE_KO  := $(MODULE_DIR)/build/all_seer_kmod.ko
 
-build:
-	$(MAKE) -C $(MODULE_DIR) CFLAGS_EXTRA="$(CFLAGS_EXTRA)"
+#build:
+#	$(MAKE) -C $(MODULE_DIR) CFLAGS_EXTRA="$(CFLAGS_EXTRA)"
 
-clean:
-	$(MAKE) -C $(MODULE_DIR) clean
+#clean:
+#	$(MAKE) -C $(MODULE_DIR) clean
 
-load: $(MODULE_KO)
-	sudo insmod $(MODULE_KO)
+#load: $(MODULE_KO)
+#	sudo insmod $(MODULE_KO)
 
-unload:
-	sudo rmmod all_seer_kmod || true
+#unload:
+#	sudo rmmod all_seer_kmod || true
 
-run-underseer:
-	@if [ -z "$(OVERSEER_HOST)" ]; then \
-		echo "ERROR: set OVERSEER_HOST=<ip> before running under-seer"; \
-		exit 1; \
-	fi
-	OVERSEER_HOST=$(OVERSEER_HOST) \
-	OVERSEER_PORT=$(or $(OVERSEER_PORT),9000) \
-	python3 underseer/underseer.py
+#run-underseer:
+#	@if [ -z "$(OVERSEER_HOST)" ]; then \
+#		echo "ERROR: set OVERSEER_HOST=<ip> before running under-seer"; \
+#		exit 1; \
+#	fi
+#	OVERSEER_HOST=$(OVERSEER_HOST) \
+#	OVERSEER_PORT=$(or $(OVERSEER_PORT),9000) \
+#	python3 underseer/underseer.py
 
-run-overseer:
-	TCP_PORT=$(or $(TCP_PORT),9000) \
-	FLASK_HOST=$(or $(FLASK_HOST),0.0.0.0) \
-	FLASK_PORT=$(or $(FLASK_PORT),5000) \
-	python3 overseer/app.py
+#run-overseer:
+#	TCP_PORT=$(or $(TCP_PORT),9000) \
+#	FLASK_HOST=$(or $(FLASK_HOST),0.0.0.0) \
+#	FLASK_PORT=$(or $(FLASK_PORT),5000) \
+#	python3 overseer/app.py

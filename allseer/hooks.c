@@ -1,5 +1,8 @@
-/* hooks.c — kprobe pre-handler implementations for All-Seer
- *
+// hooks.c 
+// kprobe pre-handler implementations for All-Seer
+// (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
+
+/*
  * Boundary flow:
  *   1) Kernel syscall path triggers a kprobe handler in this file.
  *   2) Handler checks shared guards (as_ready, as_collecting).

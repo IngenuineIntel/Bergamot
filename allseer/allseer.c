@@ -1,5 +1,6 @@
 // allseer.c
 // All-Seer kernel module core
+// (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
 /*
  * Component boundary: kernel -> userspace handoff.
@@ -42,8 +43,8 @@
 #include "switches.h"
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Bergamot");
-MODULE_DESCRIPTION("All-Seer: syscall event stream via /proc/all_seer");
+MODULE_AUTHOR("IgenuineIntel");
+MODULE_DESCRIPTION("Bergamot All-Seer: syscall event stream via /proc/all_seer");
 MODULE_VERSION("1.0");
 
 /* ── kfifo ring buffer ───────────────────────────────────────────────── */
