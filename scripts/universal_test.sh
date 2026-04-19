@@ -16,8 +16,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-UNDER_PY="$ROOT_DIR/venv_underseer/bin/python"
-OVER_PY="$ROOT_DIR/venv_overseer/bin/python"
+UNDER_PY="$ROOT_DIR/underseer/env/bin/python"
+OVER_PY="$ROOT_DIR/overseer/env/bin/python"
 
 LOG_DIR="/tmp/bergamot_universal_test_$$"
 OVER_PID=""
@@ -56,8 +56,8 @@ cleanup() {
   [[ -n "$UNDER_PID" ]] && wait "$UNDER_PID" 2>/dev/null
   [[ -n "$OVER_PID" ]] && wait "$OVER_PID" 2>/dev/null
 
-  if grep -q '^all_seer_kmod ' /proc/modules 2>/dev/null; then
-    sudo rmmod all_seer_kmod >/dev/null 2>&1 || true
+  if grep -q '^allseer_kmod ' /proc/modules 2>/dev/null; then
+    sudo rmmod allseer_kmod >/dev/null 2>&1 || true
   fi
 }
 
@@ -149,21 +149,21 @@ pass "Root privileges available for kernel-module testing"
 info "Testing kernel module build"
 make -C allseer clean >/dev/null
 make -C allseer >/dev/null
-[[ -f allseer/build/all_seer_kmod.ko ]] || fail "Built module not found"
+[[ -f allseer/build/allseer_kmod.ko ]] || fail "Built module not found"
 pass "All-Seer kernel module builds successfully"
 
 # 2) Kernel runtime checks
 info "Testing kernel runtime controls"
 
-if grep -q '^all_seer_kmod ' /proc/modules 2>/dev/null; then
-  info "all_seer_kmod already loaded; trying to unload for a fresh test"
-  sudo rmmod all_seer_kmod || true
+if grep -q '^allseer_kmod ' /proc/modules 2>/dev/null; then
+  info "allseer_kmod already loaded; trying to unload for a fresh test"
+  sudo rmmod allseer_kmod || true
 fi
 
-if grep -q '^all_seer_kmod ' /proc/modules 2>/dev/null; then
-  info "all_seer_kmod still loaded; reusing existing loaded module"
+if grep -q '^allseer_kmod ' /proc/modules 2>/dev/null; then
+  info "allseer_kmod still loaded; reusing existing loaded module"
 else
-  sudo insmod allseer/build/all_seer_kmod.ko
+  sudo insmod allseer/build/allseer_kmod.ko
 fi
 sleep 0.2
 
