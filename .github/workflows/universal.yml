@@ -26,7 +26,6 @@ jobs:
          make allseer_load
          make underseer_run &
          make overseer_run &
-         sleep 3
          make overseer_test_workflow
 
     - name: Stop Everything
