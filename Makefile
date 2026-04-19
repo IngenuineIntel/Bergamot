@@ -35,6 +35,7 @@ allseer_test: allseer_load
 
 # underseer
 underseer_prep_env:
+	-[[ -e $(UNDERSEER_PYENV) ]] || python3 -m venv $(UNDERSEER_PYENV)
 	-$(UNDERSEER_PYENV)/bin/python3 -m pip install -r $(UNDERSEER_DIR)/requirements.txt
 
 underseer_run: underseer_prep_env
@@ -42,6 +43,7 @@ underseer_run: underseer_prep_env
 
 # overseer
 overseer_prep_env:
+	-[[ -e $(OVERSEER_PYENV) ]] || python3 -m venv $(OVERSEER_PYENV)
 	-$(OVERSEER_PYENV)/bin/python3 -m pip install -r $(OVERSEER_DIR)/requirements.txt
 
 overseer_run: overseer_prep_env
