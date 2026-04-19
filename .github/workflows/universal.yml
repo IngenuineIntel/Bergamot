@@ -20,16 +20,14 @@ jobs:
     - name: Load/Test Allseer
       run: make allseer_test_workflow
 
-    - name: Run Everything Simultaneously
+    - name: Run Everything Simultaneously & Check for Webpage
       run:
         -|
          make allseer_load
          make underseer_run &
          make overseer_run &
          sleep 3
-
-    - name: Check for Overseer Webpage
-      run: make overseer_test_workflow
+         make overseer_test_workflow
 
     - name: Stop Everything
       continue-on-error: true
