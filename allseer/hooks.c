@@ -51,13 +51,15 @@ extern atomic_t as_collecting;
       return 0;                                                                \
   } while (0)
 
-/* ═══════════════════════════════════════════════════════════════════════
- * HOOK: open  (do_sys_openat2)
- * Captures every file-open / file-create syscall.
- * Argument layout (x86-64 calling convention via pt_regs):
- *   rdi = int dfd, rsi = const char __user *filename,
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: open (do_sys_openat2)
+ * Captures every file-open/file-create syscall.
+ *
+ * Argument layout:
+ *   rdi = int dfd
+ *   rsi = const char __user *filename
  *   rdx = struct open_how *how
- * ═══════════════════════════════════════════════════════════════════════ */
+ * ═════════════════════════════════════════════════════════════════════════ */
 #if AS_HOOK_OPEN
 int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
   const char __user *upath = (const char __user *)regs->si;
@@ -79,14 +81,17 @@ int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
 }
 #endif /* AS_HOOK_OPEN */
 
-/* ═══════════════════════════════════════════════════════════════════════
- * HOOK: fork  (kernel_clone)
- * Captures fork()/clone()/vfork() — fired on entry so we record the
- * parent's identity; the child PID is not yet allocated at this point.
- * We emit the parent PID in the event; ppid is the parent's own ppid.
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: fork (kernel_clone)
+ * Captures fork/clone/vfork
+ *
  * Argument layout:
  *   rdi = struct kernel_clone_args *args
- * ═══════════════════════════════════════════════════════════════════════ */
+ *
+ * Note: The hook is fired on entry so we record the parent's identity; the
+ * child PID is not yet allocated at this point. We emit the parent PID in the
+ * event; ppid is the parent's own ppid.
+ * ═════════════════════════════════════════════════════════════════════════ */
 #if AS_HOOK_FORK
 int as_probe_clone(struct kprobe *p, struct pt_regs *regs) {
   char comm[TASK_COMM_LEN];
@@ -100,9 +105,9 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs) {
 #endif /* AS_HOOK_FORK */
 
 /* ════════════════════════════════════════════════════════════════════════════
- * HOOK: exec  (do_execveat_common)
- * Captures execve / execveat.  We extract argv[0] from the filename
- * argument which holds the path of the image being loaded.
+ * HOOK: exec (do_execveat_common)
+ * Captures execve / execveat.
+ *
  * Argument layout:
  *   rdi = int fd, rsi = struct filename *filename,
  *   rdx = struct user_arg_ptr argv, rcx = struct user_arg_ptr envp,
@@ -131,13 +136,15 @@ int as_probe_execve(struct kprobe *p, struct pt_regs *regs) {
 }
 #endif /* AS_HOOK_EXEC */
 
-/* ═══════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════════════════════
  * HOOK: connect  (tcp_connect)
- * Captures outbound TCP connections.  tcp_connect is called after the
- * socket has been bound; the destination address is in sk->__sk_common.
+ * Captures outbound TCP connections (tcp_connect).
  * Argument layout:
  *   rdi = struct sock *sk, rsi = struct sk_buff *skb (ignored here)
- * ═══════════════════════════════════════════════════════════════════════ */
+ *
+ * Note: tcp_connect is called after the socket has been bound; the destination
+ * address is in sk->__sk_common.
+ * ═════════════════════════════════════════════════════════════════════════ */
 #if AS_HOOK_CONNECT
 int as_probe_connect(struct kprobe *p, struct pt_regs *regs) {
   struct sock *sk = (struct sock *)(regs->di);

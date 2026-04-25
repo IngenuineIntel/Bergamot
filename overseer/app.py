@@ -177,7 +177,7 @@ def api_stats():
     return jsonify(store.get_stats())
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     #tcp_port  = int(os.environ.get("TCP_PORT",   "12046"))

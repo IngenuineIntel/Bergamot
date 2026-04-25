@@ -45,9 +45,8 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IgenuineIntel");
-MODULE_DESCRIPTION(
-    "Bergamot All-Seer: syscall event stream via /proc/all_seer");
-MODULE_VERSION("1.0");
+MODULE_DESCRIPTION("Bergamot: System Behavior Monitor: Allseer");
+MODULE_VERSION("0.1");
 
 /* ── kfifo ring buffer ───────────────────────────────────────────────── */
 /* Holds up to 4096 events before older ones are overwritten.            */
@@ -449,7 +448,7 @@ static ssize_t as_all_seer_ctl_write(struct file *file, const char __user *ubuf,
 
 static ssize_t as_all_seer_ctl_read(struct file *file, char __user *ubuf,
                                     size_t count, loff_t *ppos) {
-  /* Event handler for `/proc/all_seer_ctl` is read */
+  /* Event handler for when `/proc/all_seer_ctl` is read */
   char status[1024];
   size_t len;
   int i;
