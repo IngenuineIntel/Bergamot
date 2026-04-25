@@ -33,6 +33,13 @@ Holds a the logic for every individual hook.
 
 ##### TODO
 
+## CODE CONFORMITY
+
+When writing contributions, please make sure you:
+ - Use spaces, not tabs
+ - Indent 2 spaces, not 4
+ - Space out unrelated lines of code, but not with multiple line breaks
+
 ### STEPS FOR ADDING SYSCALL HOOKS
  - Add a macro switch to `switches.h`
  - Add to the `as_event_type` enum in `allseer.h`

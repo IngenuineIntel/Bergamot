@@ -22,26 +22,26 @@
 #ifndef ALLSEER_H
 #define ALLSEER_H
 
-#include <linux/types.h>
 #include <linux/sched.h>
+#include <linux/types.h>
 
 enum as_event_type {
-    AS_TYPE_OPEN = 0,
-    AS_TYPE_FORK,
-    AS_TYPE_EXEC,
-    AS_TYPE_CONNECT,
+  AS_TYPE_OPEN = 0,
+  AS_TYPE_FORK,
+  AS_TYPE_EXEC,
+  AS_TYPE_CONNECT,
 };
 
 /* ── Event struct ────────────────────────────────────────────────────── */
 /* One instance is pushed into the kfifo for every intercepted event.    */
 struct as_event {
-    u64   timestamp_ns;           /* ktime_get_ns() at probe fire time   */
-    pid_t pid;                    /* PID of the triggering task          */
-    pid_t ppid;                   /* PID of the parent task              */
-    uid_t uid;                    /* UID of the triggering task          */
-    u8    type;                   /* AS_TYPE_* constant                  */
-    char  comm[TASK_COMM_LEN];    /* process name (≤15 chars + NUL)      */
-    char  arg[256];               /* filename / argv[0] / "IP:port"      */
+  u64 timestamp_ns;         /* ktime_get_ns() at probe fire time   */
+  pid_t pid;                /* PID of the triggering task          */
+  pid_t ppid;               /* PID of the parent task              */
+  uid_t uid;                /* UID of the triggering task          */
+  u8 type;                  /* AS_TYPE_* constant                  */
+  char comm[TASK_COMM_LEN]; /* process name (≤15 chars + NUL)      */
+  char arg[256];            /* filename / argv[0] / "IP:port"      */
 };
 
 /* ── Shared function declared in allseer.c, called from hooks.c ──────── */
