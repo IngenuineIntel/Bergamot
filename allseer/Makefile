@@ -19,3 +19,4 @@ clean:
 	fi
 	@rm -rf $(BUILD_DIR)
 	@rm -f Module.symvers modules.order *.mod *.mod.c *.o *.ko .*.cmd
+	@rm .module-common.o

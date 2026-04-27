@@ -4,6 +4,7 @@ underseer/env
 
 # Leftover build artifacts.
 allseer/build
+allseer/.module-common.o
 
 # __pycache__ directories
 **/__pycache__/
