@@ -2,7 +2,7 @@
 before v1.0
 
 ## Actual Development
- - [-] Flesh-out build system
+ - [x] Flesh-out build system
  - [ ] Improve webpage usability
  - [ ] Deslopify The Underseer
  - [ ] Refactor procfile claiming system (deslopify)
