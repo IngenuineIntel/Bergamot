@@ -40,6 +40,7 @@ const epsChart = new Chart(document.getElementById("eps-chart"), {
       x: { display: false },
       y: {
         min: 0,
+        max: 300,
         ticks: { color: "#8b949e", maxTicksLimit: 4 },
         grid: { color: "#30363d" },
       },
