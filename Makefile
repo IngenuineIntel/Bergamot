@@ -44,7 +44,7 @@ underseer_run: underseer_prep_env
 	sudo $(UNDERSEER_PYENV)/bin/python3 $(UNDERSEER_DIR)/underseer.py
 
 underseer_clean:
-	rm -r $(UNDERSEER_DIR)/__pycache__
+	-rm -r $(UNDERSEER_DIR)/__pycache__
 
 # overseer
 overseer_prep_env:
@@ -58,7 +58,7 @@ overseer_test_active:
 	xdg-open http://localhost:27960
 
 overseer_clean:
-	rm -r $(OVERSEER_DIR)/__pycache__
+	-rm -r $(OVERSEER_DIR)/__pycache__
 
 
 # universal tests
@@ -66,12 +66,13 @@ universal_start: allseer_build allseer_test allseer_reload
 	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run & exit 0
 
 universal_stop:
-	# the holy mother of one-liners
-	@for pid in `ps -ef | grep -E 'underseer|overseer' | awk '{print $$2}'`; do kill $$pid; done
+	@# the holy mother of one-liners
+	-@sudo bash -c "for pid in \`ps -ef | grep -E 'underseer|overseer' | grep -v 'universal_stop' | awk '{print \$$2}'\`; do kill \$$pid; done"
 	@$(MAKE) underseer_clean
 	@$(MAKE) overseer_clean
 	@$(MAKE) allseer_unload
 	@$(MAKE) allseer_clean
+	@echo "Everything's cleaned up!"
 
 # workflow formulas (less output more return codes)
 
