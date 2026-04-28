@@ -10,6 +10,13 @@ This keeps one canonical schema and synchronization point between TCP
 ingest, API responses, and browser rendering.
 """
 
+"""
+Notes while refactoring:
+
+__init__ needs to start a SQLite connection whose name will be:
+{UUID}-{UNIXTIME}.db
+"""
+
 import threading
 import time
 from collections import deque
@@ -36,10 +43,10 @@ class EventStore:
         self._event_timestamps: deque = deque(maxlen=1000)  # for rate calc
         self._rate_window: int       = rate_window
 
-    # ── Ingest ───────────────────────────────────────────────────────────
+    # ── Ingest ───────────────────────────────────────────────────────────────
 
     def add_event(self, ev: dict):
-        """Ingest one decoded event from an Under-Seer agent."""
+        """Ingest event ."""
         with self._lock:
             pid = ev.get("pid", 0)
             now_ts = ev.get("ts", 0)

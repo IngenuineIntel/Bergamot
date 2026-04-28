@@ -176,6 +176,10 @@ def api_stats():
     """Return events/sec, connected agent count, and uptime."""
     return jsonify(store.get_stats())
 
+"""
+@app.route("/eventspersec")
+def events_per_sec():
+"""
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
