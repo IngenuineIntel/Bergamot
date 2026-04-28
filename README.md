@@ -1,8 +1,8 @@
 # BERGAMOT
 
-Is a suite of programs designed to monitor events and actions
-within a system, and to filter, analyze, and display the data. Currrently, this
-ecosystem contains three programs, which operate as follows:
+Is a suite of programs designed to monitor events and actions within a system,
+and to filter, analyze, and display the data. Currrently, this ecosystem
+contains three programs, which operate as follows:
 
  - "The Allseer": Kernel module that creates events from syscall probes and
    exfiltrates the data through a listing in the `/proc` directory.
@@ -29,7 +29,7 @@ would not be the case. The top level `Makefile` has a handy formula for testing
 every component of the ecosystem:
 
 ```bash
-~$ make universal_start
+~$ make bergamot_start
 ```
 
 This compiles the module, builds virtual environments, installs packages in
@@ -39,7 +39,7 @@ on it, but it doesn't always work and you have to type in the URI yourself.
 Pressing CTRL-C won't stop everything; you'll have to run:
 
 ```bash
-~$ make universal_stop
+~$ make bergamot_stop
 ```
 
 and the programs will be killed and them module unloaded. It'll also clean any
@@ -57,7 +57,7 @@ meaningful to write here.
 
 Yes.
 
-![Flowchart for contributions](./static/contribution_guidelines.jpg)
+![I _love_ a good flowchart, don't you?](./static/contribution_guidelines.jpg)
 
 #### TODO
 

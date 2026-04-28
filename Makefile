@@ -62,10 +62,10 @@ overseer_clean:
 
 
 # universal tests
-universal_start: allseer_build allseer_test allseer_reload
+bergamot_start: allseer_build allseer_test allseer_reload
 	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run & exit 0
 
-universal_stop:
+bergamot_stop:
 	@# the holy mother of one-liners
 	-@sudo bash -c "for pid in \`ps -ef | grep -E 'underseer|overseer' | grep -v 'universal_stop' | awk '{print \$$2}'\`; do kill \$$pid; done"
 	@$(MAKE) underseer_clean
@@ -74,7 +74,7 @@ universal_stop:
 	@$(MAKE) allseer_clean
 	@echo "Everything's cleaned up!"
 
-# workflow formulas (less output more return codes)
+# workflow formulas (less output but more return codes)
 
 allseer_test_workflow: allseer_load
 	@[[ -e /proc/all_seer ]] || exit 1

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# NOTE FROM HUMAN
+# This is AI slop to accompany the old build system. Until I figure out how I
+# want to refactor it, it lives.
+
 """
 mock_proc.py — Fake /proc/all_seer for development without the kernel module.
 
