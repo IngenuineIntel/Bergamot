@@ -78,6 +78,39 @@ main {
 .full-width { flex: 1 1 100%; }
 .half       { flex: 1 1 calc(50% - 8px); min-width: 320px; }
 
+.embed-shell {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.graph-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  overflow: visible;
+}
+
+.graph-frame-eps {
+  min-height: 230px;
+}
+
+.graph-frame-processes {
+  min-height: 420px;
+}
+
+.graph-frame-feed {
+  min-height: 340px;
+}
+
+.graph-frame-syscalls {
+  min-height: 420px;
+}
+
 /* ── Table ── */
 .table-wrap {
   overflow-x: auto;
@@ -101,6 +134,7 @@ thead th {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  position: sticky;
 }
 
 thead th:hover { color: var(--accent); }
@@ -110,11 +144,79 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
 tbody td {
   padding: 5px 10px;
   border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   white-space: nowrap;
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+thead th {
+  border-right: 1px solid var(--border);
+}
+
+thead th:last-child,
+tbody td:last-child {
+  border-right: 0;
+}
+
+table.resizable-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+table.resizable-table thead th {
+  position: sticky;
+}
+
+table.resizable-table thead th .col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+table.resizable-table thead th .col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+  transform: translateX(-50%);
+}
+
+table.resizable-table thead th:hover .col-resize-handle::after,
+table.resizable-table thead th.is-resizing .col-resize-handle::after {
+  background: var(--accent);
+}
+
+body.is-resizing-cols {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* ── Sparkline canvas ── */
 #eps-chart { width: 100% !important; }
+
+@media (max-width: 900px) {
+  .graph-frame-eps {
+    min-height: 250px;
+  }
+
+  .graph-frame-processes {
+    min-height: 360px;
+  }
+
+  .graph-frame-feed {
+    min-height: 320px;
+  }
+
+  .graph-frame-syscalls {
+    min-height: 360px;
+  }
+}

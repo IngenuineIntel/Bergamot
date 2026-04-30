@@ -40,7 +40,8 @@ class EventStore:
         # Stats
         self.start_time: float       = time.time()
         self.agent_count: int        = 0
-        self._event_timestamps: deque = deque(maxlen=1000)  # for rate calc
+        # Keep all timestamps within the rolling rate window.
+        self._event_timestamps: deque = deque()
         self._rate_window: int       = rate_window
 
     # ── Ingest ───────────────────────────────────────────────────────────────
@@ -48,26 +49,32 @@ class EventStore:
     def add_event(self, ev: dict):
         """Ingest event ."""
         with self._lock:
-            pid = ev.get("pid", 0)
-            now_ts = ev.get("ts", 0)
+            if ev.get("kind") == "proc_snapshot":
+                self._apply_process_snapshot_locked(ev)
+                return
 
-            # Update process table
-            ppid = ev.get("ppid", 0)
-            uid  = ev.get("uid", 0)
+            pid = ev.get("pid", 0)
+            ts_s = int(ev.get("ts_s", 0) or 0)
+            ts_ms = int(ev.get("ts_ms", 0) or 0)
+
+            # Backward compatibility for older Under-Seer payloads with a
+            # single nanosecond timestamp field.
+            if (ts_s == 0 and ts_ms == 0) and "ts" in ev:
+                legacy_ns = int(ev.get("ts", 0) or 0)
+                ts_s, rem_ns = divmod(legacy_ns, 1_000_000_000)
+                ts_ms = rem_ns // 1_000_000
+
+            ev["ts_s"] = ts_s
+            ev["ts_ms"] = ts_ms
+
             comm = ev.get("comm", "")
-            self.processes[pid] = {
-                "pid":       pid,
-                "ppid":      ppid,
-                "uid":       uid,
-                "comm":      comm,
-                "last_seen": now_ts,
-            }
 
             ev_type = ev.get("type", "")
             arg     = ev.get("arg", "")
 
             record = {
-                "ts":   now_ts,
+                "ts_s": ts_s,
+                "ts_ms": ts_ms,
                 "pid":  pid,
                 "comm": comm,
                 "arg":  arg,
@@ -80,7 +87,45 @@ class EventStore:
                 self.network.append(record)
 
             self.recent_events.append(ev)
-            self._event_timestamps.append(time.monotonic())
+            now = time.monotonic()
+            self._event_timestamps.append(now)
+
+            cutoff = now - self._rate_window
+            while self._event_timestamps and self._event_timestamps[0] < cutoff:
+                self._event_timestamps.popleft()
+
+    def _apply_process_snapshot_locked(self, snap: dict):
+        ts_s = int(snap.get("ts_s", 0) or 0)
+        ts_ms = int(snap.get("ts_ms", 0) or 0)
+        rows = snap.get("processes", [])
+
+        new_processes: dict[int, dict] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                pid = int(row.get("pid", 0) or 0)
+                ppid = int(row.get("ppid", 0) or 0)
+                uid = int(row.get("uid", 0) or 0)
+                threads = int(row.get("threads", 0) or 0)
+                comm = str(row.get("comm", "") or "")
+            except (TypeError, ValueError):
+                continue
+
+            if pid <= 0:
+                continue
+
+            new_processes[pid] = {
+                "pid": pid,
+                "ppid": ppid,
+                "uid": uid,
+                "comm": comm,
+                "threads": threads,
+                "last_seen_s": ts_s,
+                "last_seen_ms": ts_ms,
+            }
+
+        self.processes = new_processes
 
     def agent_connected(self):
         with self._lock:
@@ -115,7 +160,11 @@ class EventStore:
         with self._lock:
             now = time.monotonic()
             cutoff = now - self._rate_window
-            recent = sum(1 for t in self._event_timestamps if t >= cutoff)
+
+            while self._event_timestamps and self._event_timestamps[0] < cutoff:
+                self._event_timestamps.popleft()
+
+            recent = len(self._event_timestamps)
             rate = recent / self._rate_window
             uptime = int(time.time() - self.start_time)
             agents = self.agent_count

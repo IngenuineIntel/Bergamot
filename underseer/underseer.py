@@ -8,24 +8,32 @@ Input interface (from All-Seer):
 
 Output interface (to Over-Seer):
     Sends newline-delimited JSON over TCP, one event per line:
-        {"ts":..., "pid":..., "ppid":..., "uid":...,
+        {"ts_s":..., "ts_ms":..., "pid":..., "ppid":..., "uid":...,
          "type":..., "comm":..., "arg":...}
 
 Role in the system:
-    This is the intended procfs consumer. Its open/read cycle claims the
-    reader lock and drains kernel-buffered events for remote transport.
+    This is the intended procfs consumer. The first successful open/read cycle
+    claims the reader lock for this process's parent scope and drains
+    kernel-buffered events for remote transport.
 
 Configuration (environment variables):
   OVERSEER_HOST       IP or hostname of the Over-Seer machine  (required)
   OVERSEER_PORT       TCP port on the Over-Seer machine         (default: 9000)
   PROC_PATH           Path to the procfs file                   (default: /proc/all_seer)
-  POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100)
+  POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100, clamped to >= 166.67)
+    PROCESS_SNAPSHOT_HZ Process snapshot frequency                (default: 0.5)
   BATCH_MAX           Max events sent in one TCP write          (default: 64)
   RECONNECT_MAX_S     Max reconnect back-off in seconds         (default: 30)
 
 Wire format (one JSON object per line):
-  {"ts": <ns>, "pid": <int>, "ppid": <int>, "uid": <int>,
+    {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
+     "ppid": <int>, "uid": <int>,
    "type": "open"|"fork"|"exec"|"connect", "comm": "<str>", "arg": "<str>"}
+
+Process snapshot wire format (one JSON object per line):
+        {"kind": "proc_snapshot", "ts_s": <unix-seconds>, "ts_ms": <0-999>,
+         "processes": [{"pid": <int>, "ppid": <int>, "uid": <int>,
+                                        "comm": "<str>", "threads": <int>}, ...]}
 """
 
 import contextlib
@@ -40,56 +48,19 @@ import time
 OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
 try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
 except TypeError: OVERSEER_PORT = 12046
-PROC_PATH        = "/proc/all_seer"
-PROC_CTL_PATH    = "/proc/all_seer_ctl"
-POLL_INTERVAL_S  = 50
-BATCH_MAX        = 128
+PROC_PATH        = os.environ.get("PROC_PATH", "/proc/all_seer")
+POLL_INTERVAL_MS = float(os.environ.get("POLL_INTERVAL_MS", "100"))
+MAX_READS_PER_SEC = 6.0
+MIN_POLL_INTERVAL_S = 1.0 / MAX_READS_PER_SEC
+POLL_INTERVAL_S  = max(POLL_INTERVAL_MS / 1000.0, MIN_POLL_INTERVAL_S)
+PROCESS_SNAPSHOT_HZ = float(os.environ.get("PROCESS_SNAPSHOT_HZ", "0.5"))
+PROCESS_SNAPSHOT_INTERVAL_S = 1.0 / max(PROCESS_SNAPSHOT_HZ, 0.001)
+BATCH_MAX        = int(os.environ.get("BATCH_MAX", "128"))
 RECONNECT_MAX_S  = 30
-
-POLL_INTERVAL_S /= 1000.0
 
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "exec", "connect")
-
-
-def _write_ctl(command: str) -> None:
-    with open(PROC_CTL_PATH, "w") as ctl:
-        ctl.write(command)
-
-
-def register_identity() -> bool:
-    """
-    Claim owner lease and install self-filter for this task group.
-
-    Returns True when both operations succeed. Failures are non-fatal; caller
-    may retry later because owner lease can be temporarily held by an old PID.
-    """
-    tgid = os.getpid()  # group leader pid == tgid for this process
-    ok = True
-
-    try:
-        _write_ctl(f"claim_owner_tgid {tgid}\n")
-        print(f"[under-seer] owner lease claimed tgid={tgid}", flush=True)
-    except FileNotFoundError:
-        print(f"[under-seer] {PROC_CTL_PATH} not found", flush=True)
-        return False
-    except PermissionError:
-        print(f"[under-seer] permission denied writing {PROC_CTL_PATH}",
-              flush=True)
-        return False
-    except OSError as exc:
-        print(f"[under-seer] owner claim failed: {exc}", flush=True)
-        ok = False
-
-    try:
-        _write_ctl(f"filter_add_tgid {tgid}\n")
-    except OSError as exc:
-        print(f"[under-seer] self-filter registration failed: {exc}",
-              flush=True)
-        ok = False
-
-    return ok
 
 
 def parse_line(line: str) -> dict | None:
@@ -112,8 +83,12 @@ def parse_line(line: str) -> dict | None:
     ts_raw, pid_raw, ppid_raw, uid_raw, type_raw, comm, arg = parts
 
     try:
+        ts_ns = int(ts_raw)
+        ts_s, rem_ns = divmod(ts_ns, 1_000_000_000)
+        ts_ms = rem_ns // 1_000_000
         return {
-            "ts":   int(ts_raw),
+            "ts_s": int(ts_s),
+            "ts_ms": int(ts_ms),
             "pid":  int(pid_raw),
             "ppid": int(ppid_raw),
             "uid":  int(uid_raw),
@@ -123,6 +98,54 @@ def parse_line(line: str) -> dict | None:
         }
     except ValueError:
         return None
+
+
+def collect_process_snapshot() -> dict:
+    now = time.time()
+    ts_s = int(now)
+    ts_ms = int((now - ts_s) * 1000)
+    processes: list[dict] = []
+
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit() or not entry.is_dir(follow_symlinks=False):
+            continue
+
+        pid = int(entry.name)
+        status_path = f"/proc/{entry.name}/status"
+        try:
+            ppid = 0
+            uid = 0
+            comm = ""
+            threads = 0
+            with open(status_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("Name:\t"):
+                        comm = line.split("\t", 1)[1].strip()
+                    elif line.startswith("PPid:\t"):
+                        ppid = int(line.split("\t", 1)[1].strip() or 0)
+                    elif line.startswith("Uid:\t"):
+                        uid = int(line.split("\t", 1)[1].split()[0])
+                    elif line.startswith("Threads:\t"):
+                        threads = int(line.split("\t", 1)[1].strip() or 0)
+
+            processes.append({
+                "pid": pid,
+                "ppid": ppid,
+                "uid": uid,
+                "comm": comm,
+                "threads": threads,
+            })
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError):
+            # Process exited (or became unreadable) while being sampled.
+            continue
+
+    processes.sort(key=lambda p: p["pid"])
+    return {
+        "kind": "proc_snapshot",
+        "ts_s": ts_s,
+        "ts_ms": ts_ms,
+        "processes": processes,
+    }
 
 
 # ── TCP sender with reconnect back-off ───────────────────────────────────────
@@ -189,12 +212,13 @@ class Sender:
 def main():
     sender = Sender(OVERSEER_HOST, OVERSEER_PORT)
     sender.connect()
-    register_identity()
 
     print(f"[under-seer] polling {PROC_PATH} every "
           f"{POLL_INTERVAL_S * 1000:.0f}ms", flush=True)
-
-    last_claim_retry = 0.0
+    print(f"[under-seer] process snapshots every "
+          f"{PROCESS_SNAPSHOT_INTERVAL_S:.2f}s", flush=True)
+    lease_announced = False
+    next_snapshot_at = time.monotonic()
 
     while True:
         # ── Read all available events from the proc file ─────────────────
@@ -203,6 +227,10 @@ def main():
         batch: list[dict] = []
         try:
             with open(PROC_PATH, "r") as fh:
+                if not lease_announced:
+                    print("[under-seer] /proc/all_seer access claimed",
+                          flush=True)
+                    lease_announced = True
                 for raw_line in fh:
                     ev = parse_line(raw_line)
                     if ev:
@@ -214,13 +242,8 @@ def main():
             time.sleep(POLL_INTERVAL_S)
             continue
         except FileNotFoundError:
-            now = time.monotonic()
-            if now - last_claim_retry >= 1.0:
-                register_identity()
-                last_claim_retry = now
-
             print(f"[under-seer] {PROC_PATH} unavailable — "
-                  "lease not claimed yet or module not loaded",
+                  "owned by another parent scope or module not loaded",
                   file=sys.stderr, flush=True)
             time.sleep(5)
             continue
@@ -235,6 +258,16 @@ def main():
                 sender.connect()
                 # Retry the same batch once after reconnect.
                 sender.send_batch(batch)
+
+        now_mono = time.monotonic()
+        if now_mono >= next_snapshot_at:
+            snapshot = collect_process_snapshot()
+            if not sender.send_batch([snapshot]):
+                sender.connect()
+                sender.send_batch([snapshot])
+
+            while next_snapshot_at <= now_mono:
+                next_snapshot_at += PROCESS_SNAPSHOT_INTERVAL_S
 
         time.sleep(POLL_INTERVAL_S)
 

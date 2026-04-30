@@ -7,10 +7,10 @@
  *   allseer.c drains struct as_event to procfs line format:
  *     <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>
  *   underseer.py parses that line into JSON keys:
- *     ts, pid, ppid, uid, type, comm, arg
+ *     ts_s, ts_ms, pid, ppid, uid, type, comm, arg
  *
  * Field mapping:
- *   timestamp_ns -> ts
+ *   timestamp_ns -> ts_s + ts_ms
  *   pid          -> pid
  *   ppid         -> ppid
  *   uid          -> uid

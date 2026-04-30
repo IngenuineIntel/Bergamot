@@ -14,18 +14,23 @@ your contribution (see checklist below)
 
 ## BEFORE YOU BEGIN - A Primer on What Everything Does
 
-Upon being loaded, the module first registers two proc files; `/proc/all_seer`
-and `/proc/all_seer_ctl`. More on them later. After this, it registers Kprobe
-hooks. If _any_ hooks fail, it prints an error specifying which hook failed,
-unregisters the proc files, and returns the error code it was given. Assuming
-this doesn't happen, it logs success, marks the module as ready, and returns
-success.
+Upon being loaded, the module first registers `/proc/all_seer`. After this, it
+registers Kprobe hooks. If _any_ hooks fail, it prints an error specifying
+which hook failed, unregisters the proc file and all registered Kprobe hooks,
+and returns the error code it was given. Assuming this doesn't happen, it logs
+success, marks the module as ready, and returns success.
 
 ##### Proc File Security System
 
-#### TODO
+The first program to successfully open `/proc/all_seer` claims it for its
+parent process. After that, only programs with that same PPID may open or read
+the file, and that ownership stays in place until the module is unloaded or
+reloaded.
 
-I need to refactor before I can write about this part of the code.
+##### TODO
+
+More elaborations here...
+
 
 ##### `allseer.c`
 Is the core of the program. It contains/defines:

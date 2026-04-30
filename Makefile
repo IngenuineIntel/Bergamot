@@ -31,7 +31,6 @@ allseer_reload: allseer_unload
 
 allseer_test: allseer_load
 	@[[ -e /proc/all_seer ]] || echo "Error: `/proc/all_seer` doesn't exist"
-	@[[ -e /proc/all_seer_ctl ]] || echo "Error: `/proc/all_seer_ctl` doesn't exist"
 	@$(MAKE) allseer_unload
 	@echo "ALL GOOD!!!"
 
@@ -78,7 +77,6 @@ bergamot_stop:
 
 allseer_test_workflow: allseer_load
 	@[[ -e /proc/all_seer ]] || exit 1
-	@[[ -e /proc/all_seer_ctl ]] || exit 1
 	@$(MAKE) allseer_unload
 
 overseer_test_workflow:

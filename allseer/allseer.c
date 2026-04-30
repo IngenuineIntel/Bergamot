@@ -14,15 +14,8 @@
  *   - as_ready flag: hooks are no-ops until module is fully initialised
  *   - Exclusive reader lock on /proc/all_seer
  *   - procfs interface (drains kfifo for the owner only)
- *   - /proc/all_seer_ctl write interface (start / stop / reset)
  *   - kprobe registration / deregistration (entries #if-gated by
  * hooks_config.h)
- *
- * /proc/all_seer_ctl commands (write a newline-terminated string):
- *   stop   — suspend event collection (hooks still installed, emit is no-op)
- *   start  — resume event collection
- *   reset  — drain the kfifo and release the current reader lock
- *   status — (read) returns "running\n" or "stopped\n"
  */
 
 #include <linux/atomic.h>
@@ -58,122 +51,92 @@ static DEFINE_SPINLOCK(as_fifo_lock);
 /*
  * Shared guard flags referenced by hooks.c as extern symbols:
  *   - as_ready: set only after init completes and probes are registered
- *   - as_collecting: toggled by /proc/all_seer_ctl start/stop commands
+ *   - as_collecting: reserved for future runtime gating; enabled by default
  */
 atomic_t as_ready = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
 /* ── Owner lease state ───────────────────────────────────────────────── */
 /*
- * Ownership is explicitly claimed through /proc/all_seer_ctl with:
- *   claim_owner_tgid <tgid>
+ * The first successful opener of /proc/all_seer claims a lease keyed by its
+ * parent process identity. Any later process with the same PPID and parent
+ * start time is treated as part of the same owner scope.
  *
- * Once claimed, only that TGID may open/read /proc/all_seer.  All other
+ * The lease is sticky until the module is unloaded or reloaded. All other
  * callers see -ENOENT ("file disappears" semantics).
  */
-static atomic_t as_owner_tgid = ATOMIC_INIT(0);
-static atomic64_t as_owner_start_time = ATOMIC64_INIT(0);
+static DEFINE_MUTEX(as_owner_lock);
+static pid_t as_owner_ppid;
+static u64 as_owner_parent_start_time;
 
 static void as_clear_owner_lease(void) {
-  atomic64_set(&as_owner_start_time, 0);
-  atomic_set(&as_owner_tgid, 0);
+  mutex_lock(&as_owner_lock);
+  as_owner_ppid = 0;
+  as_owner_parent_start_time = 0;
+  mutex_unlock(&as_owner_lock);
+}
+
+static bool as_current_parent_identity(pid_t *ppid, u64 *parent_start_time) {
+  struct task_struct *parent;
+
+  rcu_read_lock();
+  parent = rcu_dereference(current->real_parent);
+  if (!parent) {
+    rcu_read_unlock();
+    *ppid = 0;
+    *parent_start_time = 0;
+    return false;
+  }
+
+  *ppid = task_tgid_nr(parent);
+  *parent_start_time = (u64)parent->group_leader->start_time;
+  rcu_read_unlock();
+
+  return *ppid > 0 && *parent_start_time != 0;
 }
 
 static bool as_current_is_owner(void) {
-  pid_t owner_tgid = atomic_read(&as_owner_tgid);
-  u64 owner_start = (u64)atomic64_read(&as_owner_start_time);
-  u64 my_start = (u64)current->group_leader->start_time;
+  pid_t my_ppid;
+  u64 my_parent_start_time;
+  bool authorized;
 
-  return owner_tgid != 0 && owner_tgid == current->tgid &&
-         owner_start == my_start;
+  if (!as_current_parent_identity(&my_ppid, &my_parent_start_time))
+    return false;
+
+  mutex_lock(&as_owner_lock);
+  authorized = as_owner_ppid != 0 && as_owner_ppid == my_ppid &&
+               as_owner_parent_start_time == my_parent_start_time;
+  mutex_unlock(&as_owner_lock);
+
+  return authorized;
 }
 
-/* ── TGID filter state ───────────────────────────────────────────────── */
-#define AS_TGID_FILTER_MAX 64
+static bool as_claim_owner_if_unset(void) {
+  pid_t my_ppid;
+  u64 my_parent_start_time;
+  bool claimed = false;
+  bool authorized;
 
-struct as_tgid_filter {
-  pid_t tgid;
-  u64 leader_start_time;
-};
+  if (!as_current_parent_identity(&my_ppid, &my_parent_start_time))
+    return false;
 
-static struct as_tgid_filter as_tgid_filters[AS_TGID_FILTER_MAX];
-static int as_tgid_filter_count;
-static DEFINE_SPINLOCK(as_tgid_filter_lock);
-static atomic64_t as_dropped_by_filter = ATOMIC64_INIT(0);
-
-static bool as_tgid_is_filtered(void) {
-  int i;
-  bool matched = false;
-  u64 cur_start = (u64)current->group_leader->start_time;
-
-  spin_lock(&as_tgid_filter_lock);
-  for (i = 0; i < as_tgid_filter_count; i++) {
-    if (as_tgid_filters[i].tgid == current->tgid &&
-        as_tgid_filters[i].leader_start_time == cur_start) {
-      matched = true;
-      break;
-    }
-  }
-  spin_unlock(&as_tgid_filter_lock);
-
-  return matched;
-}
-
-static int as_filter_add_tgid(pid_t tgid) {
-  int i;
-
-  /* Keep filter registration self-scoped for debug/agent use. */
-  if (tgid != current->tgid)
-    return -EPERM;
-
-  spin_lock(&as_tgid_filter_lock);
-  for (i = 0; i < as_tgid_filter_count; i++) {
-    if (as_tgid_filters[i].tgid == tgid &&
-        as_tgid_filters[i].leader_start_time ==
-            (u64)current->group_leader->start_time) {
-      spin_unlock(&as_tgid_filter_lock);
-      return 0;
-    }
+  mutex_lock(&as_owner_lock);
+  if (as_owner_ppid == 0) {
+    as_owner_ppid = my_ppid;
+    as_owner_parent_start_time = my_parent_start_time;
+    claimed = true;
   }
 
-  if (as_tgid_filter_count >= AS_TGID_FILTER_MAX) {
-    spin_unlock(&as_tgid_filter_lock);
-    return -ENOSPC;
+  authorized = as_owner_ppid == my_ppid &&
+               as_owner_parent_start_time == my_parent_start_time;
+  mutex_unlock(&as_owner_lock);
+
+  if (claimed) {
+    pr_info("all_seer: owner lease claimed ppid=%d parent_start=%llu comm=%s\n",
+            my_ppid, (unsigned long long)my_parent_start_time, current->comm);
   }
 
-  as_tgid_filters[as_tgid_filter_count].tgid = tgid;
-  as_tgid_filters[as_tgid_filter_count].leader_start_time =
-      (u64)current->group_leader->start_time;
-  as_tgid_filter_count++;
-  spin_unlock(&as_tgid_filter_lock);
-
-  return 0;
-}
-
-static int as_filter_del_tgid(pid_t tgid) {
-  int i, j;
-  int removed = 0;
-
-  spin_lock(&as_tgid_filter_lock);
-  for (i = 0; i < as_tgid_filter_count;) {
-    if (as_tgid_filters[i].tgid == tgid) {
-      for (j = i; j < as_tgid_filter_count - 1; j++)
-        as_tgid_filters[j] = as_tgid_filters[j + 1];
-      as_tgid_filter_count--;
-      removed++;
-      continue;
-    }
-    i++;
-  }
-  spin_unlock(&as_tgid_filter_lock);
-
-  return removed > 0 ? 0 : -ENOENT;
-}
-
-static void as_filter_clear(void) {
-  spin_lock(&as_tgid_filter_lock);
-  as_tgid_filter_count = 0;
-  spin_unlock(&as_tgid_filter_lock);
+  return authorized;
 }
 
 /* ── as_emit_event — called from hooks.c ────────────────────────────── */
@@ -190,12 +153,6 @@ void as_emit_event(enum as_event_type type, const char *arg) {
   if (strcmp(current->comm, AS_DEBUG_IGNORE_COMM_NAME) == 0)
     return;
 #endif
-
-  /* Suppress events from explicitly ignored task groups. */
-  if (as_tgid_is_filtered()) {
-    atomic64_inc(&as_dropped_by_filter);
-    return;
-  }
 
   ev.timestamp_ns = ktime_get_ns();
   ev.pid = current->pid;
@@ -238,43 +195,16 @@ static const char *const as_type_str[] = {
  * non-NULL until the fifo is empty.
  */
 
-/* Private data attached to each open file handle. */
-struct as_file_priv {
-  bool authorized;
-};
-
 static int as_proc_open(struct inode *inode, struct file *file) {
-  /* Responsible for allocating memory when registering proc files. */
-  struct as_file_priv *priv;
-
-  priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-  if (!priv)
-    return -ENOMEM;
-
   /*
    * Strict owner lease mode:
-   *   - only claimed owner TGID can open/read
+   *   - first opener claims ownership for its parent-process scope
+   *   - only processes in that scope may open/read afterwards
    *   - everyone else sees ENOENT
    */
-  if (as_current_is_owner()) {
-    priv->authorized = true;
-  } else {
-    kfree(priv);
+  if (!as_claim_owner_if_unset())
     return -ENOENT;
-  }
 
-  file->private_data = priv;
-  return 0;
-}
-
-static int as_proc_release(struct inode *inode, struct file *file) {
-  /* Responsible for freeing up memory when unregistering proc files. */
-  struct as_file_priv *priv = file->private_data;
-
-  if (priv) {
-    kfree(priv);
-    file->private_data = NULL;
-  }
   return 0;
 }
 
@@ -292,17 +222,13 @@ static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
    *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
    *
    * Under-Seer maps these fields into JSON keys:
-   *   ts, pid, ppid, uid, type, comm, arg
+  *   ts_s, ts_ms, pid, ppid, uid, type, comm, arg
    */
 
-  struct as_file_priv *priv = file->private_data;
   struct as_event ev;
   char line[384];
   ssize_t total = 0;
   unsigned long flags;
-
-  if (!priv || !priv->authorized)
-    return -ENOENT;
 
   if (!as_current_is_owner())
     return -ENOENT;
@@ -346,159 +272,9 @@ static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
 static const struct proc_ops as_all_seer_ops = {
     .proc_open = as_proc_open,
     .proc_read = as_all_seer_read,
-    .proc_release = as_proc_release,
     .proc_lseek = noop_llseek,
 };
 static struct proc_dir_entry *as_all_seer_entry;
-
-/* ─── /proc/all_seer_ctl ─── */
-
-static ssize_t as_all_seer_ctl_write(struct file *file, const char __user *ubuf,
-                                     size_t count, loff_t *ppos) {
-  /* Event handler for when `/proc/all_seer_ctl` is written to */
-  char cmd[32];
-  size_t len = min(count, sizeof(cmd) - 1);
-  unsigned long flags;
-  int tgid;
-
-  if (copy_from_user(cmd, ubuf, len))
-    return -EFAULT;
-  cmd[len] = '\0';
-
-  /* Strip trailing newline / whitespace */
-  while (len > 0 &&
-         (cmd[len - 1] == '\n' || cmd[len - 1] == '\r' || cmd[len - 1] == ' '))
-    cmd[--len] = '\0';
-
-  if (sscanf(cmd, "claim_owner_tgid %d", &tgid) == 1) {
-    u64 start_time = 0;
-    pid_t old_owner;
-
-    if (tgid <= 0)
-      return -EINVAL;
-
-    /* Only self-claims are accepted. */
-    if (tgid != current->tgid)
-      return -EPERM;
-
-    old_owner = atomic_read(&as_owner_tgid);
-    if (old_owner != 0 && old_owner != tgid)
-      pr_info("all_seer: owner lease takeover old_tgid=%d new_tgid=%d\n",
-              old_owner, tgid);
-
-    start_time = (u64)current->group_leader->start_time;
-
-    atomic_set(&as_owner_tgid, tgid);
-    atomic64_set(&as_owner_start_time, (s64)start_time);
-    pr_info("all_seer: owner lease claimed tgid=%d comm=%s\n", tgid,
-            current->comm);
-
-  } else if (sscanf(cmd, "filter_add_tgid %d", &tgid) == 1) {
-    int ret;
-
-    if (tgid <= 0)
-      return -EINVAL;
-
-    ret = as_filter_add_tgid((pid_t)tgid);
-    if (ret)
-      return ret;
-
-    pr_info("all_seer: filter added tgid=%d\n", tgid);
-
-  } else if (sscanf(cmd, "filter_del_tgid %d", &tgid) == 1) {
-    int ret;
-
-    if (tgid <= 0)
-      return -EINVAL;
-
-    ret = as_filter_del_tgid((pid_t)tgid);
-    if (ret)
-      return ret;
-
-    pr_info("all_seer: filter removed tgid=%d\n", tgid);
-
-  } else if (strcmp(cmd, "filter_clear") == 0) {
-    as_filter_clear();
-    pr_info("all_seer: all filters cleared\n");
-
-  } else if (strcmp(cmd, "stop") == 0) {
-    atomic_set(&as_collecting, 0);
-    pr_info("all_seer: collection stopped via ctl\n");
-
-  } else if (strcmp(cmd, "start") == 0) {
-    atomic_set(&as_collecting, 1);
-    pr_info("all_seer: collection started via ctl\n");
-
-  } else if (strcmp(cmd, "reset") == 0) {
-    /* Drain the fifo */
-    spin_lock_irqsave(&as_fifo_lock, flags);
-    kfifo_reset(&as_fifo);
-    spin_unlock_irqrestore(&as_fifo_lock, flags);
-    /* Release owner lease so a new Under-Seer can claim after reset. */
-    as_clear_owner_lease();
-    pr_info("all_seer: buffer reset and owner lease cleared via ctl\n");
-
-  } else {
-    pr_warn("all_seer: unknown ctl command: %s\n", cmd);
-    return -EINVAL;
-  }
-
-  return (ssize_t)count;
-}
-
-static ssize_t as_all_seer_ctl_read(struct file *file, char __user *ubuf,
-                                    size_t count, loff_t *ppos) {
-  /* Event handler for when `/proc/all_seer_ctl` is read */
-  char status[1024];
-  size_t len;
-  int i;
-  ssize_t written;
-  pid_t owner_tgid;
-  u64 owner_start;
-
-  owner_tgid = atomic_read(&as_owner_tgid);
-  owner_start = (u64)atomic64_read(&as_owner_start_time);
-
-  written =
-      scnprintf(status, sizeof(status),
-                "%s\nowner_tgid=%d owner_start=%llu\n"
-                "filters=%d dropped_by_filter=%llu\n",
-                atomic_read(&as_collecting) ? "running" : "stopped", owner_tgid,
-                (unsigned long long)owner_start, as_tgid_filter_count,
-                (unsigned long long)atomic64_read(&as_dropped_by_filter));
-
-  spin_lock(&as_tgid_filter_lock);
-  for (i = 0; i < as_tgid_filter_count && written < sizeof(status); i++) {
-    written +=
-        scnprintf(status + written, sizeof(status) - written,
-                  "filter[%d]=tgid:%d start:%llu\n", i, as_tgid_filters[i].tgid,
-                  (unsigned long long)as_tgid_filters[i].leader_start_time);
-  }
-  spin_unlock(&as_tgid_filter_lock);
-
-  len = min_t(size_t, (size_t)written, sizeof(status));
-
-  if (*ppos >= (loff_t)len)
-    return 0;
-
-  len -= *ppos;
-  if (len > count)
-    len = count;
-
-  if (copy_to_user(ubuf, status + *ppos, len))
-    return -EFAULT;
-
-  *ppos += len;
-  return (ssize_t)len;
-}
-
-static const struct proc_ops as_all_seer_ctl_ops = {
-    .proc_read = as_all_seer_ctl_read,
-    .proc_write = as_all_seer_ctl_write,
-    .proc_release = as_proc_release,
-    .proc_lseek = noop_llseek,
-};
-static struct proc_dir_entry *as_all_seer_ctl_entry;
 
 /* ── KPROBE DECLARATIONS ────────────────────────────────────────────────── */
 
@@ -561,16 +337,6 @@ static int __init allseer_init(void) {
     return -ENOMEM;
   }
 
-  // registering /proc/all_seer_ctl
-  as_all_seer_ctl_entry =
-      proc_create("all_seer_ctl", 0600, NULL, &as_all_seer_ctl_ops);
-  if (!as_all_seer_ctl_entry) {
-    pr_err("all_seer: failed to create /proc/all_seer_ctl\n");
-    proc_remove(as_all_seer_ctl_entry);
-
-    return -ENOMEM;
-  }
-
   // registering all kprobe hooks
   for (i = 0; i < as_num_probes; i++) {
     ret = register_kprobe(&as_kprobes[i]);
@@ -582,14 +348,12 @@ static int __init allseer_init(void) {
       while (--i >= 0)
         unregister_kprobe(&as_kprobes[i]);
 
-      proc_remove(as_all_seer_ctl_entry);
       proc_remove(as_all_seer_entry);
       return ret;
     }
   }
 
   // mark module as ready
-  as_filter_clear();
   as_clear_owner_lease();
 
   atomic_set(&as_ready, 1);
@@ -614,7 +378,6 @@ static void __exit allseer_exit(void) {
 
   // unregistering procfs entries
   proc_remove(as_all_seer_entry);
-  proc_remove(as_all_seer_ctl_entry);
 
   pr_info("all_seer: unloaded\n");
 }

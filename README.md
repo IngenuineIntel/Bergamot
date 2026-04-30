@@ -5,7 +5,7 @@ and to filter, analyze, and display the data. Currrently, this ecosystem
 contains three programs, which operate as follows:
 
  - "The Allseer": Kernel module that creates events from syscall probes and
-   exfiltrates the data through a listing in the `/proc` directory.
+   exfiltrates the data through `/proc/all_seer`.
  - "The Underseer": Reads said data and sends it to another device
  - "The Overseer": Receives data and displays it on a webpage.
 

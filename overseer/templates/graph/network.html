@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Connections</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <section class="card full-width">
+      <h2>Network Connections</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time (unix.sss)</th><th>PID</th><th>Comm</th><th>Destination</th></tr>
+          </thead>
+          <tbody id="net-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/iframe_resize_child.js"></script>
+</body>
+</html>
