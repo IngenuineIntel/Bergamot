@@ -38,12 +38,11 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IgenuineIntel");
-MODULE_DESCRIPTION("Bergamot: System Behavior Monitor: Allseer");
+MODULE_DESCRIPTION("System Event Analytics");
 MODULE_VERSION("0.1");
 
-/* ── kfifo ring buffer ───────────────────────────────────────────────── */
-/* Holds up to 4096 events before older ones are overwritten.            */
-#define AS_FIFO_SIZE 4096
+/* ── KFIFO RING BUFFER ──────────────────────────────────────────────────── */
+#define AS_FIFO_SIZE 8192
 
 static DEFINE_KFIFO(as_fifo, struct as_event, AS_FIFO_SIZE);
 static DEFINE_SPINLOCK(as_fifo_lock);
@@ -56,90 +55,7 @@ static DEFINE_SPINLOCK(as_fifo_lock);
 atomic_t as_ready = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
-/* ── Owner lease state ───────────────────────────────────────────────── */
-/*
- * The first successful opener of /proc/all_seer claims a lease keyed by its
- * parent process identity. Any later process with the same PPID and parent
- * start time is treated as part of the same owner scope.
- *
- * The lease is sticky until the module is unloaded or reloaded. All other
- * callers see -ENOENT ("file disappears" semantics).
- */
-static DEFINE_MUTEX(as_owner_lock);
-static pid_t as_owner_ppid;
-static u64 as_owner_parent_start_time;
-
-static void as_clear_owner_lease(void) {
-  mutex_lock(&as_owner_lock);
-  as_owner_ppid = 0;
-  as_owner_parent_start_time = 0;
-  mutex_unlock(&as_owner_lock);
-}
-
-static bool as_current_parent_identity(pid_t *ppid, u64 *parent_start_time) {
-  struct task_struct *parent;
-
-  rcu_read_lock();
-  parent = rcu_dereference(current->real_parent);
-  if (!parent) {
-    rcu_read_unlock();
-    *ppid = 0;
-    *parent_start_time = 0;
-    return false;
-  }
-
-  *ppid = task_tgid_nr(parent);
-  *parent_start_time = (u64)parent->group_leader->start_time;
-  rcu_read_unlock();
-
-  return *ppid > 0 && *parent_start_time != 0;
-}
-
-static bool as_current_is_owner(void) {
-  pid_t my_ppid;
-  u64 my_parent_start_time;
-  bool authorized;
-
-  if (!as_current_parent_identity(&my_ppid, &my_parent_start_time))
-    return false;
-
-  mutex_lock(&as_owner_lock);
-  authorized = as_owner_ppid != 0 && as_owner_ppid == my_ppid &&
-               as_owner_parent_start_time == my_parent_start_time;
-  mutex_unlock(&as_owner_lock);
-
-  return authorized;
-}
-
-static bool as_claim_owner_if_unset(void) {
-  pid_t my_ppid;
-  u64 my_parent_start_time;
-  bool claimed = false;
-  bool authorized;
-
-  if (!as_current_parent_identity(&my_ppid, &my_parent_start_time))
-    return false;
-
-  mutex_lock(&as_owner_lock);
-  if (as_owner_ppid == 0) {
-    as_owner_ppid = my_ppid;
-    as_owner_parent_start_time = my_parent_start_time;
-    claimed = true;
-  }
-
-  authorized = as_owner_ppid == my_ppid &&
-               as_owner_parent_start_time == my_parent_start_time;
-  mutex_unlock(&as_owner_lock);
-
-  if (claimed) {
-    pr_info("all_seer: owner lease claimed ppid=%d parent_start=%llu comm=%s\n",
-            my_ppid, (unsigned long long)my_parent_start_time, current->comm);
-  }
-
-  return authorized;
-}
-
-/* ── as_emit_event — called from hooks.c ────────────────────────────── */
+/* as_emit_event — called from hooks.c */
 void as_emit_event(enum as_event_type type, const char *arg) {
   struct as_event ev;
   unsigned long flags;
@@ -175,7 +91,113 @@ void as_emit_event(enum as_event_type type, const char *arg) {
 }
 EXPORT_SYMBOL(as_emit_event);
 
+/* ── END KFIFO RING BUFFER ──────────────────────────────────────────────── */
+
 /* ── PROCFS INTERFACE ───────────────────────────────────────────────────── */
+
+/* Owner lease state
+ * The first successful opener of /proc/all_seer claims a lease. If the
+ * opener's PPID is 1 (it called setsid, making init its parent), only that
+ * exact PID holds the lease. Otherwise any process sharing the same PPID is
+ * treated as part of the same owner scope.
+ *
+ * The lease is sticky until the module is unloaded or reloaded. All other
+ * callers see -ENOENT ("file disappears" semantics).
+ */
+static DEFINE_MUTEX(lease_owner_lock);
+
+struct lease_owner_ident {
+  /* managing identifying attributes of a claiming process */
+  pid_t pid;
+  pid_t ppid;
+  // if setsid == 1, only the PID gets the lease, else all children of the PPID
+  // get it. `setsid` should only be made true if PPID == 1
+  bool  setsid;
+};
+static struct lease_owner_ident lease_ident;
+
+static void as_clear_owner_lease(void) {
+  /* Clears lease */
+  mutex_lock(&lease_owner_lock);
+  lease_ident.pid = 0;
+  lease_ident.ppid = 0;
+  lease_ident.setsid = false;
+  mutex_unlock(&lease_owner_lock);
+}
+
+static struct lease_owner_ident as_current_parent_identity(void) {
+  /* Gathers information from the process that has last interacted */
+  struct lease_owner_ident ident = {0};
+  struct task_struct *parent;
+
+  ident.pid = task_tgid_nr(current);
+
+  rcu_read_lock();
+  parent = rcu_dereference(current->real_parent);
+  if (!parent) {
+    rcu_read_unlock();
+    return ident;
+  }
+
+  ident.ppid = task_tgid_nr(parent);
+  rcu_read_unlock();
+
+  ident.setsid = (ident.ppid == 1);
+
+  return ident;
+
+}
+
+static bool as_current_is_owner(void) {
+  /* Checks the interacting process against the authorized one */
+  struct lease_owner_ident loc_ident = as_current_parent_identity();
+  bool authorized;
+
+  if (loc_ident.ppid <= 0)
+    return false;
+
+  mutex_lock(&lease_owner_lock);
+  if (lease_ident.ppid == 0)
+    authorized = false;
+  else if (lease_ident.setsid)
+    authorized = loc_ident.pid == lease_ident.pid;
+  else
+    authorized = loc_ident.ppid == lease_ident.ppid;
+  mutex_unlock(&lease_owner_lock);
+
+  return authorized;
+}
+
+static bool as_claim_owner_if_unset(void) {
+  /* Authorizes the interacting process if another one hasn't been authorized
+   * yet.
+   */
+  struct lease_owner_ident my_ident = as_current_parent_identity();
+  bool claimed = false;
+  bool authorized;
+
+  if (my_ident.ppid <= 0)
+    return false;
+
+  mutex_lock(&lease_owner_lock);
+  if (lease_ident.ppid == 0) {
+    lease_ident = my_ident;
+    claimed = true;
+  }
+
+  if (lease_ident.setsid)
+    authorized = my_ident.pid == lease_ident.pid;
+  else
+    authorized = my_ident.ppid == lease_ident.ppid;
+  mutex_unlock(&lease_owner_lock);
+
+  if (claimed) {
+    pr_info("all_seer: owner lease claimed pid=%d ppid=%d setsid=%d comm=%s\n",
+            my_ident.pid, my_ident.ppid, (int)my_ident.setsid, current->comm);
+  }
+
+  return authorized;
+}
 
 static const char *const as_type_str[] = {
     [AS_TYPE_OPEN] = "open",
@@ -196,6 +218,7 @@ static const char *const as_type_str[] = {
  */
 
 static int as_proc_open(struct inode *inode, struct file *file) {
+  /* Logic for when procfile is opened */
   /*
    * Strict owner lease mode:
    *   - first opener claims ownership for its parent-process scope
@@ -208,9 +231,7 @@ static int as_proc_open(struct inode *inode, struct file *file) {
   return 0;
 }
 
-/* ─── /proc/all_seer ─── */
-
-static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
+static ssize_t as_proc_read(struct file *file, char __user *ubuf,
                                 size_t count, loff_t *ppos) {
   /* Event handler for when `/proc/all_seer` is read.
    *
@@ -271,10 +292,12 @@ static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
 
 static const struct proc_ops as_all_seer_ops = {
     .proc_open = as_proc_open,
-    .proc_read = as_all_seer_read,
+    .proc_read = as_proc_read,
     .proc_lseek = noop_llseek,
 };
 static struct proc_dir_entry *as_all_seer_entry;
+
+/* ── END PROCFS INTERFACE ───────────────────────────────────────────────── */
 
 /* ── KPROBE DECLARATIONS ────────────────────────────────────────────────── */
 
@@ -322,6 +345,8 @@ static struct kprobe as_kprobes[] = {
 };
 
 static int as_num_probes = ARRAY_SIZE(as_kprobes);
+
+/* ── END KPROBE DECLARATIONS ────────────────────────────────────────────── */
 
 /* ── INIT/EXIT ──────────────────────────────────────────────────────────── */
 
@@ -384,3 +409,5 @@ static void __exit allseer_exit(void) {
 
 module_init(allseer_init);
 module_exit(allseer_exit);
+
+/* ── END INIT/EXIT ──────────────────────────────────────────────────────── */
