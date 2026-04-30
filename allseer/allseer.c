@@ -222,7 +222,7 @@ static ssize_t as_all_seer_read(struct file *file, char __user *ubuf,
    *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
    *
    * Under-Seer maps these fields into JSON keys:
-   *   ts, pid, ppid, uid, type, comm, arg
+  *   ts_s, ts_ms, pid, ppid, uid, type, comm, arg
    */
 
   struct as_event ev;

@@ -8,7 +8,7 @@ Input interface (from All-Seer):
 
 Output interface (to Over-Seer):
     Sends newline-delimited JSON over TCP, one event per line:
-        {"ts":..., "pid":..., "ppid":..., "uid":...,
+        {"ts_s":..., "ts_ms":..., "pid":..., "ppid":..., "uid":...,
          "type":..., "comm":..., "arg":...}
 
 Role in the system:
@@ -25,7 +25,8 @@ Configuration (environment variables):
   RECONNECT_MAX_S     Max reconnect back-off in seconds         (default: 30)
 
 Wire format (one JSON object per line):
-  {"ts": <ns>, "pid": <int>, "ppid": <int>, "uid": <int>,
+    {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
+     "ppid": <int>, "uid": <int>,
    "type": "open"|"fork"|"exec"|"connect", "comm": "<str>", "arg": "<str>"}
 """
 
@@ -73,8 +74,12 @@ def parse_line(line: str) -> dict | None:
     ts_raw, pid_raw, ppid_raw, uid_raw, type_raw, comm, arg = parts
 
     try:
+        ts_ns = int(ts_raw)
+        ts_s, rem_ns = divmod(ts_ns, 1_000_000_000)
+        ts_ms = rem_ns // 1_000_000
         return {
-            "ts":   int(ts_raw),
+            "ts_s": int(ts_s),
+            "ts_ms": int(ts_ms),
             "pid":  int(pid_raw),
             "ppid": int(ppid_raw),
             "uid":  int(uid_raw),

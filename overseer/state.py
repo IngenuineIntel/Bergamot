@@ -49,7 +49,18 @@ class EventStore:
         """Ingest event ."""
         with self._lock:
             pid = ev.get("pid", 0)
-            now_ts = ev.get("ts", 0)
+            ts_s = int(ev.get("ts_s", 0) or 0)
+            ts_ms = int(ev.get("ts_ms", 0) or 0)
+
+            # Backward compatibility for older Under-Seer payloads with a
+            # single nanosecond timestamp field.
+            if (ts_s == 0 and ts_ms == 0) and "ts" in ev:
+                legacy_ns = int(ev.get("ts", 0) or 0)
+                ts_s, rem_ns = divmod(legacy_ns, 1_000_000_000)
+                ts_ms = rem_ns // 1_000_000
+
+            ev["ts_s"] = ts_s
+            ev["ts_ms"] = ts_ms
 
             # Update process table
             ppid = ev.get("ppid", 0)
@@ -60,14 +71,16 @@ class EventStore:
                 "ppid":      ppid,
                 "uid":       uid,
                 "comm":      comm,
-                "last_seen": now_ts,
+                "last_seen_s": ts_s,
+                "last_seen_ms": ts_ms,
             }
 
             ev_type = ev.get("type", "")
             arg     = ev.get("arg", "")
 
             record = {
-                "ts":   now_ts,
+                "ts_s": ts_s,
+                "ts_ms": ts_ms,
                 "pid":  pid,
                 "comm": comm,
                 "arg":  arg,

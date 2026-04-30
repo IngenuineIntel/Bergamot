@@ -7,7 +7,7 @@
  *      /api/stream with event types: event, stats, ping
  *
  * Payload schema mirrors Under-Seer output:
- *   {ts, pid, ppid, uid, type, comm, arg}
+ *   {ts_s, ts_ms, pid, ppid, uid, type, comm, arg}
  */
 
 "use strict";
@@ -63,6 +63,12 @@ function fmtUptime(seconds) {
   return `${h}h ${m}m ${s}s`;
 }
 
+function fmtEventTs(ts_s, ts_ms) {
+  const sec = Number(ts_s ?? 0);
+  const ms = Number(ts_ms ?? 0);
+  return `${sec}.${String(ms).padStart(3, "0")}`;
+}
+
 function applyStats(stats) {
   const eps = Number(stats.events_per_sec || 0);
   document.getElementById("stat-eps").textContent = eps.toFixed(1);
@@ -96,7 +102,8 @@ function updateProcFromEvent(ev) {
     ppid: ev.ppid,
     uid: ev.uid,
     comm: ev.comm,
-    last_seen: ev.ts,
+    last_seen_s: ev.ts_s,
+    last_seen_ms: ev.ts_ms,
   };
 }
 
@@ -120,7 +127,7 @@ function renderProcs() {
       <td>${p.ppid}</td>
       <td>${p.uid}</td>
       <td>${esc(p.comm)}</td>
-      <td>${p.last_seen}</td>
+      <td>${fmtEventTs(p.last_seen_s, p.last_seen_ms)}</td>
     `;
     fragment.appendChild(tr);
   });
@@ -144,7 +151,7 @@ function prependFeedRow(tbodyId, ev) {
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${ev.ts}</td>
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
     <td>${ev.pid}</td>
     <td>${esc(ev.comm)}</td>
     <td class="arg-cell">${esc(ev.arg)}</td>
