@@ -20,7 +20,7 @@ Configuration (environment variables):
   OVERSEER_HOST       IP or hostname of the Over-Seer machine  (required)
   OVERSEER_PORT       TCP port on the Over-Seer machine         (default: 9000)
   PROC_PATH           Path to the procfs file                   (default: /proc/all_seer)
-  POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100)
+  POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100, clamped to >= 166.67)
   BATCH_MAX           Max events sent in one TCP write          (default: 64)
   RECONNECT_MAX_S     Max reconnect back-off in seconds         (default: 30)
 
@@ -42,12 +42,13 @@ import time
 OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
 try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
 except TypeError: OVERSEER_PORT = 12046
-PROC_PATH        = "/proc/all_seer"
-POLL_INTERVAL_S  = 50
-BATCH_MAX        = 128
+PROC_PATH        = os.environ.get("PROC_PATH", "/proc/all_seer")
+POLL_INTERVAL_MS = float(os.environ.get("POLL_INTERVAL_MS", "100"))
+MAX_READS_PER_SEC = 6.0
+MIN_POLL_INTERVAL_S = 1.0 / MAX_READS_PER_SEC
+POLL_INTERVAL_S  = max(POLL_INTERVAL_MS / 1000.0, MIN_POLL_INTERVAL_S)
+BATCH_MAX        = int(os.environ.get("BATCH_MAX", "128"))
 RECONNECT_MAX_S  = 30
-
-POLL_INTERVAL_S /= 1000.0
 
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
