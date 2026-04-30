@@ -3,6 +3,7 @@ before v1.0
 
 ## Actual Development
  - [x] Flesh-out build system
+ - [ ] Refactor Underseer timestamps to have a second timestamp in milliseconds
  - [ ] Improve webpage usability
  - [ ] Deslopify The Underseer
  - [ ] Refactor procfile claiming system (deslopify)

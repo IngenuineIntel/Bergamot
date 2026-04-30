@@ -13,7 +13,9 @@
 "use strict";
 
 const SPARKLINE_POINTS = 60;
-const MAX_FEED_ROWS = 100;
+const SPARKLINE_MAX_Y  = 300;
+
+const MAX_FEED_ROWS = 300;
 
 // --- Sparkline ---------------------------------------------------------------
 
@@ -40,7 +42,7 @@ const epsChart = new Chart(document.getElementById("eps-chart"), {
       x: { display: false },
       y: {
         min: 0,
-        max: 300,
+        max: SPARKLINE_MAX_Y,
         ticks: { color: "#8b949e", maxTicksLimit: 4 },
         grid: { color: "#30363d" },
       },

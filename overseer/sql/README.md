@@ -11,5 +11,6 @@ IN THIS DIR
 ---
 
  - `newdb.sql` - Initializes the database
+ - `dbentry.sql` - Inserts events
 
 ##### TODO

@@ -15,7 +15,8 @@ INSERT INTO metadata (
 
 CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts INTEGER DEFAULT (unixepoch()), -- UNIX time
+    ts_s INTEGER DEFAULT (unixepoch()), -- UNIX time
+    ts_ms INTEGER, -- additional milliseconds
     pid INTEGER, -- PID
     ppid INTEGER, -- PPID
     uid INTEGER, -- UID
