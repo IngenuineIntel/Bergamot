@@ -12,8 +12,9 @@ Output interface (to Over-Seer):
          "type":..., "comm":..., "arg":...}
 
 Role in the system:
-    This is the intended procfs consumer. Its open/read cycle claims the
-    reader lock and drains kernel-buffered events for remote transport.
+    This is the intended procfs consumer. The first successful open/read cycle
+    claims the reader lock for this process's parent scope and drains
+    kernel-buffered events for remote transport.
 
 Configuration (environment variables):
   OVERSEER_HOST       IP or hostname of the Over-Seer machine  (required)
@@ -41,7 +42,6 @@ OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
 try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
 except TypeError: OVERSEER_PORT = 12046
 PROC_PATH        = "/proc/all_seer"
-PROC_CTL_PATH    = "/proc/all_seer_ctl"
 POLL_INTERVAL_S  = 50
 BATCH_MAX        = 128
 RECONNECT_MAX_S  = 30
@@ -51,45 +51,6 @@ POLL_INTERVAL_S /= 1000.0
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "exec", "connect")
-
-
-def _write_ctl(command: str) -> None:
-    with open(PROC_CTL_PATH, "w") as ctl:
-        ctl.write(command)
-
-
-def register_identity() -> bool:
-    """
-    Claim owner lease and install self-filter for this task group.
-
-    Returns True when both operations succeed. Failures are non-fatal; caller
-    may retry later because owner lease can be temporarily held by an old PID.
-    """
-    tgid = os.getpid()  # group leader pid == tgid for this process
-    ok = True
-
-    try:
-        _write_ctl(f"claim_owner_tgid {tgid}\n")
-        print(f"[under-seer] owner lease claimed tgid={tgid}", flush=True)
-    except FileNotFoundError:
-        print(f"[under-seer] {PROC_CTL_PATH} not found", flush=True)
-        return False
-    except PermissionError:
-        print(f"[under-seer] permission denied writing {PROC_CTL_PATH}",
-              flush=True)
-        return False
-    except OSError as exc:
-        print(f"[under-seer] owner claim failed: {exc}", flush=True)
-        ok = False
-
-    try:
-        _write_ctl(f"filter_add_tgid {tgid}\n")
-    except OSError as exc:
-        print(f"[under-seer] self-filter registration failed: {exc}",
-              flush=True)
-        ok = False
-
-    return ok
 
 
 def parse_line(line: str) -> dict | None:
@@ -189,12 +150,10 @@ class Sender:
 def main():
     sender = Sender(OVERSEER_HOST, OVERSEER_PORT)
     sender.connect()
-    register_identity()
 
     print(f"[under-seer] polling {PROC_PATH} every "
           f"{POLL_INTERVAL_S * 1000:.0f}ms", flush=True)
-
-    last_claim_retry = 0.0
+    lease_announced = False
 
     while True:
         # ── Read all available events from the proc file ─────────────────
@@ -203,6 +162,10 @@ def main():
         batch: list[dict] = []
         try:
             with open(PROC_PATH, "r") as fh:
+                if not lease_announced:
+                    print("[under-seer] /proc/all_seer access claimed",
+                          flush=True)
+                    lease_announced = True
                 for raw_line in fh:
                     ev = parse_line(raw_line)
                     if ev:
@@ -214,13 +177,8 @@ def main():
             time.sleep(POLL_INTERVAL_S)
             continue
         except FileNotFoundError:
-            now = time.monotonic()
-            if now - last_claim_retry >= 1.0:
-                register_identity()
-                last_claim_retry = now
-
             print(f"[under-seer] {PROC_PATH} unavailable — "
-                  "lease not claimed yet or module not loaded",
+                  "owned by another parent scope or module not loaded",
                   file=sys.stderr, flush=True)
             time.sleep(5)
             continue
