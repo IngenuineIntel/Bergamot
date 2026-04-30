@@ -107,6 +107,10 @@ main {
   min-height: 340px;
 }
 
+.graph-frame-syscalls {
+  min-height: 420px;
+}
+
 /* ── Table ── */
 .table-wrap {
   overflow-x: auto;
@@ -159,5 +163,9 @@ tbody td {
 
   .graph-frame-feed {
     min-height: 320px;
+  }
+
+  .graph-frame-syscalls {
+    min-height: 360px;
   }
 }

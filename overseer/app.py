@@ -116,6 +116,11 @@ def graph_network():
     return render_template("graph/network.html")
 
 
+@app.route("/graph/syscalls")
+def graph_syscalls():
+    return render_template("graph/syscalls.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """

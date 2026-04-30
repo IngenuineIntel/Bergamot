@@ -28,6 +28,7 @@ const ui = {
   procBody: document.getElementById("proc-body"),
   openBody: document.getElementById("open-body"),
   netBody: document.getElementById("net-body"),
+  syscallsBody: document.getElementById("syscalls-body"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -35,6 +36,7 @@ const hasEps = Boolean(ui.epsCanvas && typeof window.Chart !== "undefined");
 const hasProcTable = Boolean(ui.procBody);
 const hasOpenFeed = Boolean(ui.openBody);
 const hasNetworkFeed = Boolean(ui.netBody);
+const hasSyscallsFeed = Boolean(ui.syscallsBody);
 
 let epsData = null;
 let epsChart = null;
@@ -212,14 +214,58 @@ function prependFeedRow(tbodyId, ev) {
   }
 }
 
+function packetType(ev) {
+  if (ev?.kind === "proc_snapshot") return "proc_snapshot";
+  if (typeof ev?.type === "string" && ev.type) return ev.type;
+  if (typeof ev?.kind === "string" && ev.kind) return ev.kind;
+  return "unknown";
+}
+
+function packetArg1(ev) {
+  if (ev?.arg1 != null) return ev.arg1;
+  if (ev?.arg != null) return ev.arg;
+  if (ev?.kind === "proc_snapshot" && Array.isArray(ev?.processes)) {
+    return `processes=${ev.processes.length}`;
+  }
+  return "";
+}
+
+function packetArg2(ev) {
+  if (ev?.arg2 != null) return ev.arg2;
+  return "";
+}
+
+function prependEventRow(ev) {
+  if (!ui.syscallsBody || !ev || typeof ev !== "object") return;
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${esc(ev.pid ?? "")}</td>
+    <td>${esc(ev.ppid ?? "")}</td>
+    <td>${esc(ev.uid ?? "")}</td>
+    <td>${esc(packetType(ev))}</td>
+    <td>${esc(ev.comm ?? "")}</td>
+    <td class="arg-cell">${esc(packetArg1(ev))}</td>
+    <td class="arg-cell">${esc(packetArg2(ev))}</td>
+  `;
+  ui.syscallsBody.insertBefore(tr, ui.syscallsBody.firstChild);
+
+  while (ui.syscallsBody.rows.length > MAX_FEED_ROWS) {
+    ui.syscallsBody.deleteRow(ui.syscallsBody.rows.length - 1);
+  }
+}
+
 function ingestEvent(ev) {
   if (hasProcTable && ev?.kind === "proc_snapshot") {
     applyProcessSnapshot(ev);
+    if (hasSyscallsFeed) prependEventRow(ev);
     return;
   }
 
   if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
+  if (hasSyscallsFeed) prependEventRow(ev);
 }
 
 // --- REST snapshot bootstrap -------------------------------------------------
@@ -260,6 +306,16 @@ async function loadSnapshot() {
     );
   }
 
+  if (hasSyscallsFeed) {
+    tasks.push(
+      fetch("/api/events")
+        .then((r) => r.json())
+        .then((events) => {
+          [...events].reverse().forEach((ev) => prependEventRow(ev));
+        })
+    );
+  }
+
   if (hasEps || hasStats) {
     tasks.push(
       fetch("/api/stats")
@@ -276,13 +332,13 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed)) {
     return;
   }
 
   const es = new EventSource("/api/stream");
 
-  if (hasProcTable || hasOpenFeed || hasNetworkFeed) {
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
     es.addEventListener("event", (e) => {
       try {
         ingestEvent(JSON.parse(e.data));
@@ -327,7 +383,7 @@ function niceCeil(value) {
 
 // --- Boot --------------------------------------------------------------------
 
-if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed) {
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
   loadSnapshot()
     .then(connectSSE)
     .catch((err) => {
