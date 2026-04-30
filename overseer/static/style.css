@@ -78,6 +78,35 @@ main {
 .full-width { flex: 1 1 100%; }
 .half       { flex: 1 1 calc(50% - 8px); min-width: 320px; }
 
+.embed-shell {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.graph-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  overflow: visible;
+}
+
+.graph-frame-eps {
+  min-height: 230px;
+}
+
+.graph-frame-processes {
+  min-height: 420px;
+}
+
+.graph-frame-feed {
+  min-height: 340px;
+}
+
 /* ── Table ── */
 .table-wrap {
   overflow-x: auto;
@@ -118,3 +147,17 @@ tbody td {
 
 /* ── Sparkline canvas ── */
 #eps-chart { width: 100% !important; }
+
+@media (max-width: 900px) {
+  .graph-frame-eps {
+    min-height: 250px;
+  }
+
+  .graph-frame-processes {
+    min-height: 360px;
+  }
+
+  .graph-frame-feed {
+    min-height: 320px;
+  }
+}

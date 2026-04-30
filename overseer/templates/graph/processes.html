@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Processes</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <section class="card full-width">
+      <h2>Processes</h2>
+      <div class="table-wrap">
+        <table id="proc-table">
+          <thead>
+            <tr>
+              <th data-col="pid">PID</th>
+              <th data-col="ppid">PPID</th>
+              <th data-col="uid">UID</th>
+              <th data-col="comm">Command</th>
+              <th data-col="last_seen_s">Last seen (unix.sss)</th>
+            </tr>
+          </thead>
+          <tbody id="proc-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/iframe_resize_child.js"></script>
+</body>
+</html>

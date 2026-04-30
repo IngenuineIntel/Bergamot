@@ -4,71 +4,32 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard - Bergamot</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
     <h1>Over-Seer</h1>
-    <div id="stats-bar">
-      <span>Events/s: <strong id="stat-eps">—</strong></span>
-      <span>Agents: <strong id="stat-agents">—</strong></span>
-      <span>Uptime: <strong id="stat-uptime">—</strong></span>
-    </div>
+    <div id="stats-bar"><span>Widget Pages Embedded via Iframes</span></div>
   </header>
 
   <main>
-    <!-- ── Events/sec sparkline ── -->
-    <section class="card full-width">
-      <h2>Events / second</h2>
-      <canvas id="eps-chart" height="200"></canvas>
+    <section class="card embed-shell full-width">
+      <iframe class="graph-frame graph-frame-eps" data-graph-frame title="Events per second graph" src="/graph/events-per-sec" loading="lazy"></iframe>
     </section>
 
-    <!-- ── Process table ── -->
-    <section class="card full-width">
-      <h2>Processes</h2>
-      <div class="table-wrap">
-        <table id="proc-table">
-          <thead>
-            <tr>
-              <th data-col="pid">PID</th>
-              <th data-col="ppid">PPID</th>
-              <th data-col="uid">UID</th>
-              <th data-col="comm">Command</th>
-              <th data-col="last_seen_s">Last&nbsp;seen (unix.sss)</th>
-            </tr>
-          </thead>
-          <tbody id="proc-body"></tbody>
-        </table>
-      </div>
+    <section class="card embed-shell full-width">
+      <iframe class="graph-frame graph-frame-processes" data-graph-frame title="Processes table" src="/graph/processes" loading="lazy"></iframe>
     </section>
 
-    <!-- ── File opens + Network side-by-side ── -->
-    <section class="card half">
-      <h2>File Opens</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Time (unix.sss)</th><th>PID</th><th>Comm</th><th>Path</th></tr>
-          </thead>
-          <tbody id="open-body"></tbody>
-        </table>
-      </div>
+    <section class="card embed-shell half">
+      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="File opens table" src="/graph/file-opens" loading="lazy"></iframe>
     </section>
 
-    <section class="card half">
-      <h2>Network Connections</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Time (unix.sss)</th><th>PID</th><th>Comm</th><th>Destination</th></tr>
-          </thead>
-          <tbody id="net-body"></tbody>
-        </table>
-      </div>
+    <section class="card embed-shell half">
+      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="Network connections table" src="/graph/network" loading="lazy"></iframe>
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/iframe_resize_parent.js"></script>
 </body>
 </html>

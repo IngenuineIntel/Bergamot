@@ -17,40 +17,61 @@ const SPARKLINE_MAX_Y  = 300;
 
 const MAX_FEED_ROWS = 300;
 
-// --- Sparkline ---------------------------------------------------------------
+const ui = {
+  statEps: document.getElementById("stat-eps"),
+  statAgents: document.getElementById("stat-agents"),
+  statUptime: document.getElementById("stat-uptime"),
+  epsCanvas: document.getElementById("eps-chart"),
+  procTable: document.getElementById("proc-table"),
+  procBody: document.getElementById("proc-body"),
+  openBody: document.getElementById("open-body"),
+  netBody: document.getElementById("net-body"),
+};
 
-const epsData = Array(SPARKLINE_POINTS).fill(0);
-const epsChart = new Chart(document.getElementById("eps-chart"), {
-  type: "line",
-  data: {
-    labels: Array(SPARKLINE_POINTS).fill(""),
-    datasets: [{
-      data: epsData,
-      borderColor: "#58a6ff",
-      backgroundColor: "rgba(88,166,255,0.15)",
-      borderWidth: 2,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: true,
-    }],
-  },
-  options: {
-    animation: false,
-    responsive: true,
-    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    scales: {
-      x: { display: false },
-      y: {
-        min: 0,
-        max: SPARKLINE_MAX_Y,
-        ticks: { color: "#8b949e", maxTicksLimit: 4 },
-        grid: { color: "#30363d" },
+const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
+const hasEps = Boolean(ui.epsCanvas && typeof window.Chart !== "undefined");
+const hasProcTable = Boolean(ui.procBody);
+const hasOpenFeed = Boolean(ui.openBody);
+const hasNetworkFeed = Boolean(ui.netBody);
+
+let epsData = null;
+let epsChart = null;
+
+if (hasEps) {
+  epsData = Array(SPARKLINE_POINTS).fill(0);
+  epsChart = new Chart(ui.epsCanvas, {
+    type: "line",
+    data: {
+      labels: Array(SPARKLINE_POINTS).fill(""),
+      datasets: [{
+        data: epsData,
+        borderColor: "#58a6ff",
+        backgroundColor: "rgba(88,166,255,0.15)",
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: true,
+      }],
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          min: 0,
+          max: SPARKLINE_MAX_Y,
+          ticks: { color: "#8b949e", maxTicksLimit: 4 },
+          grid: { color: "#30363d" },
+        },
       },
     },
-  },
-});
+  });
+}
 
 function pushEps(value) {
+  if (!epsData || !epsChart) return;
   epsData.push(value);
   epsData.shift();
   epsChart.update("none");
@@ -71,10 +92,10 @@ function fmtEventTs(ts_s, ts_ms) {
 
 function applyStats(stats) {
   const eps = Number(stats.events_per_sec || 0);
-  document.getElementById("stat-eps").textContent = eps.toFixed(1);
-  document.getElementById("stat-agents").textContent = String(stats.agent_count ?? 0);
-  document.getElementById("stat-uptime").textContent = fmtUptime(Number(stats.uptime_s || 0));
-  pushEps(eps);
+  if (ui.statEps) ui.statEps.textContent = eps.toFixed(1);
+  if (ui.statAgents) ui.statAgents.textContent = String(stats.agent_count ?? 0);
+  if (ui.statUptime) ui.statUptime.textContent = fmtUptime(Number(stats.uptime_s || 0));
+  if (hasEps) pushEps(eps);
 }
 
 // --- Process table -----------------------------------------------------------
@@ -83,18 +104,20 @@ let procSortCol = "pid";
 let procSortAsc = true;
 const procMap = {}; // pid -> row data, updated from snapshots + SSE events
 
-document.querySelectorAll("#proc-table thead th").forEach((th) => {
-  th.addEventListener("click", () => {
-    const col = th.dataset.col;
-    if (procSortCol === col) {
-      procSortAsc = !procSortAsc;
-    } else {
-      procSortCol = col;
-      procSortAsc = true;
-    }
-    renderProcs();
+if (ui.procTable) {
+  document.querySelectorAll("#proc-table thead th").forEach((th) => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (procSortCol === col) {
+        procSortAsc = !procSortAsc;
+      } else {
+        procSortCol = col;
+        procSortAsc = true;
+      }
+      renderProcs();
+    });
   });
-});
+}
 
 function updateProcFromEvent(ev) {
   procMap[ev.pid] = {
@@ -108,6 +131,8 @@ function updateProcFromEvent(ev) {
 }
 
 function renderProcs() {
+  if (!ui.procBody) return;
+
   const rows = Object.values(procMap);
   rows.sort((a, b) => {
     const av = a[procSortCol] ?? "";
@@ -117,7 +142,6 @@ function renderProcs() {
     return 0;
   });
 
-  const tbody = document.getElementById("proc-body");
   const fragment = document.createDocumentFragment();
 
   rows.forEach((p) => {
@@ -132,7 +156,7 @@ function renderProcs() {
     fragment.appendChild(tr);
   });
 
-  tbody.replaceChildren(fragment);
+  ui.procBody.replaceChildren(fragment);
 }
 
 let procDirty = false;
@@ -146,7 +170,7 @@ setInterval(() => {
 // --- Feed tables -------------------------------------------------------------
 
 function prependFeedRow(tbodyId, ev) {
-  const tbody = document.getElementById(tbodyId);
+  const tbody = tbodyId === "open-body" ? ui.openBody : ui.netBody;
   if (!tbody) return;
 
   const tr = document.createElement("tr");
@@ -164,50 +188,90 @@ function prependFeedRow(tbodyId, ev) {
 }
 
 function ingestEvent(ev) {
-  updateProcFromEvent(ev);
-  procDirty = true;
+  if (hasProcTable) {
+    updateProcFromEvent(ev);
+    procDirty = true;
+  }
 
-  if (ev.type === "open") prependFeedRow("open-body", ev);
-  if (ev.type === "connect") prependFeedRow("net-body", ev);
+  if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
+  if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
 }
 
 // --- REST snapshot bootstrap -------------------------------------------------
 
 async function loadSnapshot() {
-  const [procs, opens, nets, stats] = await Promise.all([
-    fetch("/api/processes").then((r) => r.json()),
-    fetch("/api/file_opens").then((r) => r.json()),
-    fetch("/api/network").then((r) => r.json()),
-    fetch("/api/stats").then((r) => r.json()),
-  ]);
+  const tasks = [];
 
-  procs.forEach((p) => {
-    procMap[p.pid] = p;
-  });
-  renderProcs();
+  if (hasProcTable) {
+    tasks.push(
+      fetch("/api/processes")
+        .then((r) => r.json())
+        .then((procs) => {
+          procs.forEach((p) => {
+            procMap[p.pid] = p;
+          });
+          renderProcs();
+        })
+    );
+  }
 
-  // Insert oldest-first so newest ends up visually on top.
-  [...opens].reverse().forEach((ev) => prependFeedRow("open-body", ev));
-  [...nets].reverse().forEach((ev) => prependFeedRow("net-body", ev));
-  applyStats(stats);
+  if (hasOpenFeed) {
+    tasks.push(
+      fetch("/api/file_opens")
+        .then((r) => r.json())
+        .then((opens) => {
+          [...opens].reverse().forEach((ev) => prependFeedRow("open-body", ev));
+        })
+    );
+  }
+
+  if (hasNetworkFeed) {
+    tasks.push(
+      fetch("/api/network")
+        .then((r) => r.json())
+        .then((nets) => {
+          [...nets].reverse().forEach((ev) => prependFeedRow("net-body", ev));
+        })
+    );
+  }
+
+  if (hasEps || hasStats) {
+    tasks.push(
+      fetch("/api/stats")
+        .then((r) => r.json())
+        .then((stats) => {
+          applyStats(stats);
+        })
+    );
+  }
+
+  await Promise.all(tasks);
 }
 
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed)) {
+    return;
+  }
+
   const es = new EventSource("/api/stream");
 
-  es.addEventListener("event", (e) => {
-    try {
-      ingestEvent(JSON.parse(e.data));
-    } catch (_) {}
-  });
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed) {
+    es.addEventListener("event", (e) => {
+      try {
+        ingestEvent(JSON.parse(e.data));
+      } catch (_) {}
+    });
+  }
 
-  es.addEventListener("stats", (e) => {
-    try {
-      applyStats(JSON.parse(e.data));
-    } catch (_) {}
-  });
+  if (hasEps || hasStats) {
+    es.addEventListener("stats", (e) => {
+      try {
+        applyStats(JSON.parse(e.data));
+      } catch (_) {}
+    });
+  }
 
   es.addEventListener("ping", () => {
     // Keepalive frame, no UI update required.
@@ -231,9 +295,11 @@ function esc(str) {
 
 // --- Boot --------------------------------------------------------------------
 
-loadSnapshot()
-  .then(connectSSE)
-  .catch((err) => {
-    console.warn("Initial snapshot failed:", err);
-    connectSSE();
-  });
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed) {
+  loadSnapshot()
+    .then(connectSSE)
+    .catch((err) => {
+      console.warn("Initial snapshot failed:", err);
+      connectSSE();
+    });
+}

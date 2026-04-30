@@ -96,6 +96,26 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/graph/events-per-sec")
+def graph_events_per_sec():
+    return render_template("graph/events_per_sec.html")
+
+
+@app.route("/graph/processes")
+def graph_processes():
+    return render_template("graph/processes.html")
+
+
+@app.route("/graph/file-opens")
+def graph_file_opens():
+    return render_template("graph/file_opens.html")
+
+
+@app.route("/graph/network")
+def graph_network():
+    return render_template("graph/network.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """
@@ -175,11 +195,6 @@ def api_network():
 def api_stats():
     """Return events/sec, connected agent count, and uptime."""
     return jsonify(store.get_stats())
-
-"""
-@app.route("/eventspersec")
-def events_per_sec():
-"""
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
