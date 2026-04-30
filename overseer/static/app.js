@@ -6,8 +6,9 @@
  *   2) Live stream over SSE:
  *      /api/stream with event types: event, stats, ping
  *
- * Payload schema mirrors Under-Seer output:
- *   {ts_s, ts_ms, pid, ppid, uid, type, comm, arg}
+ * Payload schemas:
+ *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, comm, arg}
+ *   Process snapshots: {kind: "proc_snapshot", ts_s, ts_ms, processes: [...]}
  */
 
 "use strict";
@@ -111,7 +112,7 @@ function applyStats(stats) {
 
 let procSortCol = "pid";
 let procSortAsc = true;
-const procMap = {}; // pid -> row data, updated from snapshots + SSE events
+const procMap = {}; // pid -> row data, updated from snapshots
 
 if (ui.procTable) {
   document.querySelectorAll("#proc-table thead th").forEach((th) => {
@@ -128,15 +129,29 @@ if (ui.procTable) {
   });
 }
 
-function updateProcFromEvent(ev) {
-  procMap[ev.pid] = {
-    pid: ev.pid,
-    ppid: ev.ppid,
-    uid: ev.uid,
-    comm: ev.comm,
-    last_seen_s: ev.ts_s,
-    last_seen_ms: ev.ts_ms,
-  };
+function applyProcessSnapshot(snapshot) {
+  const rows = Array.isArray(snapshot?.processes) ? snapshot.processes : [];
+
+  Object.keys(procMap).forEach((pid) => {
+    delete procMap[pid];
+  });
+
+  rows.forEach((row) => {
+    const pid = Number(row.pid);
+    if (!Number.isFinite(pid) || pid <= 0) return;
+
+    procMap[pid] = {
+      pid,
+      ppid: Number(row.ppid ?? 0),
+      uid: Number(row.uid ?? 0),
+      comm: row.comm ?? "",
+      threads: Number(row.threads ?? 0),
+      last_seen_s: Number(snapshot.ts_s ?? 0),
+      last_seen_ms: Number(snapshot.ts_ms ?? 0),
+    };
+  });
+
+  procDirty = true;
 }
 
 function renderProcs() {
@@ -160,6 +175,7 @@ function renderProcs() {
       <td>${p.ppid}</td>
       <td>${p.uid}</td>
       <td>${esc(p.comm)}</td>
+      <td>${p.threads ?? 0}</td>
       <td>${fmtEventTs(p.last_seen_s, p.last_seen_ms)}</td>
     `;
     fragment.appendChild(tr);
@@ -197,9 +213,9 @@ function prependFeedRow(tbodyId, ev) {
 }
 
 function ingestEvent(ev) {
-  if (hasProcTable) {
-    updateProcFromEvent(ev);
-    procDirty = true;
+  if (hasProcTable && ev?.kind === "proc_snapshot") {
+    applyProcessSnapshot(ev);
+    return;
   }
 
   if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
@@ -219,7 +235,7 @@ async function loadSnapshot() {
           procs.forEach((p) => {
             procMap[p.pid] = p;
           });
-          renderProcs();
+          procDirty = true;
         })
     );
   }
