@@ -40,7 +40,8 @@ class EventStore:
         # Stats
         self.start_time: float       = time.time()
         self.agent_count: int        = 0
-        self._event_timestamps: deque = deque(maxlen=1000)  # for rate calc
+        # Keep all timestamps within the rolling rate window.
+        self._event_timestamps: deque = deque()
         self._rate_window: int       = rate_window
 
     # ── Ingest ───────────────────────────────────────────────────────────────
@@ -93,7 +94,12 @@ class EventStore:
                 self.network.append(record)
 
             self.recent_events.append(ev)
-            self._event_timestamps.append(time.monotonic())
+            now = time.monotonic()
+            self._event_timestamps.append(now)
+
+            cutoff = now - self._rate_window
+            while self._event_timestamps and self._event_timestamps[0] < cutoff:
+                self._event_timestamps.popleft()
 
     def agent_connected(self):
         with self._lock:
@@ -128,7 +134,11 @@ class EventStore:
         with self._lock:
             now = time.monotonic()
             cutoff = now - self._rate_window
-            recent = sum(1 for t in self._event_timestamps if t >= cutoff)
+
+            while self._event_timestamps and self._event_timestamps[0] < cutoff:
+                self._event_timestamps.popleft()
+
+            recent = len(self._event_timestamps)
             rate = recent / self._rate_window
             uptime = int(time.time() - self.start_time)
             agents = self.agent_count

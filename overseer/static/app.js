@@ -14,6 +14,7 @@
 
 const SPARKLINE_POINTS = 60;
 const SPARKLINE_MAX_Y  = 300;
+const SPARKLINE_MIN_Y  = 10;
 
 const MAX_FEED_ROWS = 300;
 
@@ -74,6 +75,14 @@ function pushEps(value) {
   if (!epsData || !epsChart) return;
   epsData.push(value);
   epsData.shift();
+
+  // Scale y-axis to the recent peak so current values are never clipped.
+  const peak = Math.max(...epsData, 1);
+  const targetMax = Math.max(SPARKLINE_MIN_Y, niceCeil(peak * 1.15));
+  if (epsChart.options.scales?.y?.max !== targetMax) {
+    epsChart.options.scales.y.max = targetMax;
+  }
+
   epsChart.update("none");
 }
 
@@ -291,6 +300,13 @@ function esc(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function niceCeil(value) {
+  if (!Number.isFinite(value) || value <= 0) return SPARKLINE_MIN_Y;
+  const exponent = Math.floor(Math.log10(value));
+  const unit = Math.pow(10, exponent);
+  return Math.ceil(value / unit) * unit;
 }
 
 // --- Boot --------------------------------------------------------------------
