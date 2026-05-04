@@ -23,7 +23,7 @@ import time
 Inline code hardening would have been very superfluous and messy, ergo, a
 wrapper!
 """
-def envvar_fetch(name: str, valtype: type, default) -> valtype:
+def envvar_fetch(name: str, valtype: type, default):
     try: default = valtype(default)
     except TypeError: raise AssertionError(
         f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
