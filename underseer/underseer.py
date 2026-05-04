@@ -21,7 +21,7 @@ Configuration (environment variables):
   OVERSEER_PORT       TCP port on the Over-Seer machine         (default: 9000)
   PROC_PATH           Path to the procfs file                   (default: /proc/all_seer)
   POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100, clamped to >= 166.67)
-    PROCESS_SNAPSHOT_HZ Process snapshot frequency                (default: 0.5)
+  PROCESS_SNAPSHOT_HZ Process snapshot frequency                (default: 0.5)
   BATCH_MAX           Max events sent in one TCP write          (default: 64)
   RECONNECT_MAX_S     Max reconnect back-off in seconds         (default: 30)
 
@@ -48,11 +48,12 @@ import time
 OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
 try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
 except TypeError: OVERSEER_PORT = 12046
-PROC_PATH        = os.environ.get("PROC_PATH", "/proc/all_seer")
-POLL_INTERVAL_MS = float(os.environ.get("POLL_INTERVAL_MS", "100"))
-MAX_READS_PER_SEC = 6.0
-MIN_POLL_INTERVAL_S = 1.0 / MAX_READS_PER_SEC
-POLL_INTERVAL_S  = max(POLL_INTERVAL_MS / 1000.0, MIN_POLL_INTERVAL_S)
+PROC_PATH        = "/proc/all_seer"
+
+POLL_INTERVAL_HZ = 0.25
+# or, if it helps
+#POLL_INTERVAL_HZ = max(1 / [number of reads/s])
+
 PROCESS_SNAPSHOT_HZ = float(os.environ.get("PROCESS_SNAPSHOT_HZ", "0.5"))
 PROCESS_SNAPSHOT_INTERVAL_S = 1.0 / max(PROCESS_SNAPSHOT_HZ, 0.001)
 BATCH_MAX        = int(os.environ.get("BATCH_MAX", "128"))
@@ -214,7 +215,7 @@ def main():
     sender.connect()
 
     print(f"[under-seer] polling {PROC_PATH} every "
-          f"{POLL_INTERVAL_S * 1000:.0f}ms", flush=True)
+          f"{POLL_INTERVAL_HZ * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
           f"{PROCESS_SNAPSHOT_INTERVAL_S:.2f}s", flush=True)
     lease_announced = False
@@ -239,7 +240,7 @@ def main():
                         break
         except PermissionError:
             # Another process owns the proc file; wait and retry.
-            time.sleep(POLL_INTERVAL_S)
+            time.sleep(POLL_INTERVAL_HZ)
             continue
         except FileNotFoundError:
             print(f"[under-seer] {PROC_PATH} unavailable — "
@@ -249,7 +250,7 @@ def main():
             continue
         except OSError as exc:
             print(f"[under-seer] read error: {exc}", flush=True)
-            time.sleep(POLL_INTERVAL_S)
+            time.sleep(POLL_INTERVAL_HZ)
             continue
 
         # ── Forward events to Over-Seer ───────────────────────────────────
@@ -269,7 +270,7 @@ def main():
             while next_snapshot_at <= now_mono:
                 next_snapshot_at += PROCESS_SNAPSHOT_INTERVAL_S
 
-        time.sleep(POLL_INTERVAL_S)
+        time.sleep(POLL_INTERVAL_HZ)
 
 
 if __name__ == "__main__":
