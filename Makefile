@@ -78,5 +78,5 @@ allseer_test_workflow: allseer_load
 	@$(MAKE) allseer_unload
 
 overseer_test_workflow:
-	sleep 3
+	sleep 5
 	wget http://localhost:27960
