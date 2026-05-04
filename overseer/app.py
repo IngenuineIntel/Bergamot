@@ -202,14 +202,18 @@ def api_stats():
     return jsonify(store.get_stats())
 
 # ── Entry point ──────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    #tcp_port  = int(os.environ.get("TCP_PORT",   "12046"))
-    #http_host = os.environ.get("FLASK_HOST", "127.0.0.1")
-    #http_port = int(os.environ.get("FLASK_PORT", "27960"))
-    tcp_port = 12046
+    def envvar_fetch(name: str, valtype: type, default) -> valtype:
+        try: default = valtype(default)
+        except TypeError: raise AssertionError(
+            f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
+        )
+        try: return valtype(os.environ[str])
+        except: return default
+
+    tcp_port = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
     http_host = "0.0.0.0"
-    http_port = 27960
+    http_port = envvar_fetch("BERGAMOT_HTTP_PORT", int, 27960)
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)

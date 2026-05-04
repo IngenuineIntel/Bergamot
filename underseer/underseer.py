@@ -1,31 +1,6 @@
 #!/usr/bin/env python3
 """
-underseer.py — All-Seer polling/forwarding bridge.
-
-Input interface (from All-Seer):
-    Reads /proc/all_seer text lines produced by allseer.c:
-        <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>
-
-Output interface (to Over-Seer):
-    Sends newline-delimited JSON over TCP, one event per line:
-        {"ts_s":..., "ts_ms":..., "pid":..., "ppid":..., "uid":...,
-         "type":..., "comm":..., "arg":...}
-
-Role in the system:
-    This is the intended procfs consumer. The first successful open/read cycle
-    claims the reader lock for this process's parent scope and drains
-    kernel-buffered events for remote transport.
-
-Configuration (environment variables):
-  OVERSEER_HOST       IP or hostname of the Over-Seer machine  (required)
-  OVERSEER_PORT       TCP port on the Over-Seer machine         (default: 9000)
-  PROC_PATH           Path to the procfs file                   (default: /proc/all_seer)
-  POLL_INTERVAL_MS    Milliseconds between read attempts        (default: 100, clamped to >= 166.67)
-  PROCESS_SNAPSHOT_HZ Process snapshot frequency                (default: 0.5)
-  BATCH_MAX           Max events sent in one TCP write          (default: 64)
-  RECONNECT_MAX_S     Max reconnect back-off in seconds         (default: 30)
-
-Wire format (one JSON object per line):
+Syscall wire format (one JSON object per line):
     {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
      "ppid": <int>, "uid": <int>,
    "type": "open"|"fork"|"exec"|"connect", "comm": "<str>", "arg": "<str>"}
@@ -43,22 +18,33 @@ import socket
 import sys
 import time
 
+# ── SWITCH HARDENING ─────────────────────────────────────────────────────── #
+"""
+Inline code hardening would have been very superfluous and messy, ergo, a
+wrapper!
+"""
+def envvar_fetch(name: str, valtype: type, default) -> valtype:
+    try: default = valtype(default)
+    except TypeError: raise AssertionError(
+        f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
+    )
+    try: return valtype(os.environ[str])
+    except: return default
+
 # ── SWITCHES ─────────────────────────────────────────────────────────────── #
-
-OVERSEER_HOST    = os.environ.get("OVERSEER_HOST", "127.0.0.1")
-try: OVERSEER_PORT = int(os.environ.get("OVERSEER_PORT", "12046"))
-except TypeError: OVERSEER_PORT = 12046
-PROC_PATH        = "/proc/all_seer"
-
-POLL_INTERVAL_HZ = 0.25
-# or, if it helps
-#POLL_INTERVAL_HZ = max(1 / [number of reads/s])
-
-PROCESS_SNAPSHOT_HZ = float(os.environ.get("PROCESS_SNAPSHOT_HZ", "0.5"))
-PROCESS_SNAPSHOT_INTERVAL_S = 1.0 / max(PROCESS_SNAPSHOT_HZ, 0.001)
-BATCH_MAX        = int(os.environ.get("BATCH_MAX", "128"))
-RECONNECT_MAX_S  = 30
-
+"""
+WIRE_DST        The IP of the Overseer instance. Default is localhost.
+WIRE_PORT       The port of the Overseer instance, default is the port used for
+                texture downloads in Second Life 2.
+WIRE_HZ         The frequency the procfile is read and a network packet sent.
+WIRE_BATCH_MAX  The max amount of data to be read or sent ever iteration.
+WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
+"""
+WIRE_DST  = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
+WIRE_PORT = envvar_fetch("BEGRAMOT_WIRE_PORT", int, 12046)
+WIRE_HZ   = envvar_fetch("BEGAMOT_WIRE_HZ", float, 0.25)
+WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 256)
+WIRE_REC_MAX   = 30
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "exec", "connect")
@@ -173,7 +159,7 @@ class Sender:
             print(f"[under-seer] connect failed: {exc}; "
                   f"retrying in {self._backoff:.0f}s", flush=True)
             time.sleep(self._backoff)
-            self._backoff = min(self._backoff * 2, RECONNECT_MAX_S)
+            self._backoff = min(self._backoff * 2, WIRE_REC_MAX)
             return False
 
     def connect(self):
@@ -211,13 +197,13 @@ class Sender:
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def main():
-    sender = Sender(OVERSEER_HOST, OVERSEER_PORT)
+    sender = Sender(WIRE_DST, WIRE_PORT)
     sender.connect()
 
-    print(f"[under-seer] polling {PROC_PATH} every "
-          f"{POLL_INTERVAL_HZ * 1000:.0f}ms", flush=True)
+    print(f"[under-seer] polling /proc/all_seer every "
+          f"{WIRE_HZ * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
-          f"{PROCESS_SNAPSHOT_INTERVAL_S:.2f}s", flush=True)
+          f"{WIRE_HZ:.2f}s", flush=True)
     lease_announced = False
     next_snapshot_at = time.monotonic()
 
@@ -227,7 +213,7 @@ def main():
         # this process is expected to be the exclusive authorized reader.
         batch: list[dict] = []
         try:
-            with open(PROC_PATH, "r") as fh:
+            with open("/proc/all_seer", "r") as fh:
                 if not lease_announced:
                     print("[under-seer] /proc/all_seer access claimed",
                           flush=True)
@@ -236,11 +222,11 @@ def main():
                     ev = parse_line(raw_line)
                     if ev:
                         batch.append(ev)
-                    if len(batch) >= BATCH_MAX:
+                    if len(batch) >= WIRE_BATCH_MAX:
                         break
         except PermissionError:
             # Another process owns the proc file; wait and retry.
-            time.sleep(POLL_INTERVAL_HZ)
+            time.sleep(WIRE_HZ)
             continue
         except FileNotFoundError:
             print(f"[under-seer] {PROC_PATH} unavailable — "
@@ -250,7 +236,7 @@ def main():
             continue
         except OSError as exc:
             print(f"[under-seer] read error: {exc}", flush=True)
-            time.sleep(POLL_INTERVAL_HZ)
+            time.sleep(WIRE_HZ)
             continue
 
         # ── Forward events to Over-Seer ───────────────────────────────────
@@ -268,9 +254,9 @@ def main():
                 sender.send_batch([snapshot])
 
             while next_snapshot_at <= now_mono:
-                next_snapshot_at += PROCESS_SNAPSHOT_INTERVAL_S
+                next_snapshot_at += WIRE_HZ
 
-        time.sleep(POLL_INTERVAL_HZ)
+        time.sleep(WIRE_HZ)
 
 
 if __name__ == "__main__":

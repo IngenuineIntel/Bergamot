@@ -46,6 +46,20 @@ and the programs will be killed and them module unloaded. It'll also clean any
 compilation files and `__pycache__`s. It will not, however, delete the virtual
 environments it created before running the programs that use them.
 
+### Environment Variables
+
+Runtime environment variables can be used to alter network and behavior
+settings. Currently, they are as follows:
+ - `BERGAMOT_HOST`: The IP of the Ovserseer instance, default is localhost
+ - `BERGAMOT_WIRE_PORT`: The port the Overseer receives the wire protocol at,
+ default is 12046
+ - `BERGAMOT_HTTP_PORT`: The port the Overseer hosts the webpage on, default is
+ 27960
+ - `BERGAMOT_WIRE_HZ`: The frequency of the iterations the Underseer makes when
+ reading/sending information, default is 0.25 (Hz)
+ - `BERGAMOT_BATCH_MAX`: The maximum amount of syscall entries that can be sent
+ via the wire protocol at once
+
 ### Compiling For Use
 
 #### TODO

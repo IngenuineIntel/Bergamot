@@ -1,8 +1,6 @@
 #!/usr/bin/make
 
-# TODO make formula to test Python programs without the kernel module using `mock_proc.py`
-
-# vars
+# build vars
 SHELL := /bin/bash
 
 MODULE_DIR := ./allseer
