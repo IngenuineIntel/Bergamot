@@ -2,6 +2,10 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body {
+  height: 100%;
+}
+
 :root {
   --bg:        #0d1117;
   --surface:   #161b22;
@@ -19,7 +23,9 @@ body {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
-  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Header ── */
@@ -70,6 +76,8 @@ main {
   flex-wrap: wrap;
   gap: 16px;
   padding: 16px 24px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .live-main {
@@ -77,6 +85,8 @@ main {
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   padding: 16px 24px;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .card {
@@ -99,15 +109,15 @@ main {
 .half       { flex: 1 1 calc(50% - 8px); min-width: 320px; }
 
 .live-pane {
-  height: min(1000px, calc(100vh - 110px));
-  min-height: 700px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 .live-table-wrap {
-  max-height: calc(100% - 36px);
-  height: calc(100% - 36px);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .embed-shell {
@@ -116,11 +126,14 @@ main {
   border-radius: 0;
   padding: 0;
   overflow: visible;
+  display: flex;
+  min-height: 0;
 }
 
 .graph-frame {
   display: block;
   width: 100%;
+  height: 100%;
   border: 0;
   border-radius: 0;
   background: var(--surface);
@@ -148,6 +161,11 @@ main {
   overflow-x: auto;
   max-height: 320px;
   overflow-y: auto;
+}
+
+.table-wrap.live-table-wrap {
+  max-height: none;
+  height: auto;
 }
 
 table {
@@ -238,16 +256,18 @@ body.is-resizing-cols {
 @media (max-width: 900px) {
   .live-main {
     grid-template-columns: 1fr;
+    overflow: auto;
   }
 
   .live-pane {
     height: auto;
-    min-height: 360px;
+    min-height: 420px;
   }
 
-  .live-table-wrap {
-    max-height: 360px;
+  .table-wrap.live-table-wrap {
+    max-height: none;
     height: auto;
+    min-height: 320px;
   }
 
   .graph-frame-eps {
