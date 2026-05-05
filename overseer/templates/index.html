@@ -42,22 +42,26 @@
     </section>
 
     <section class="card live-pane live-pane-right">
-      <h2>All Syscalls</h2>
+      <h2>Dead Processes</h2>
       <div class="table-wrap live-table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Time (unix.sss)</th>
+              <th>Start (unix.sss)</th>
+              <th>Last (unix.sss)</th>
               <th>PID</th>
               <th>PPID</th>
               <th>UID</th>
-              <th>Type</th>
               <th>Comm</th>
-              <th>Arg1</th>
-              <th>Arg2</th>
+              <th>Exec</th>
+              <th>Running</th>
+              <th>Opens</th>
+              <th>Connects</th>
+              <th>First Open</th>
+              <th>First Connect</th>
             </tr>
           </thead>
-          <tbody id="syscalls-body"></tbody>
+          <tbody id="dead-processes-body"></tbody>
         </table>
       </div>
     </section>

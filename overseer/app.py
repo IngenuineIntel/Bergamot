@@ -135,6 +135,11 @@ def graph_fork_exec():
     return render_template("graph/fork_exec.html")
 
 
+@app.route("/graph/dead-processes")
+def graph_dead_processes():
+    return render_template("graph/dead_processes.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """
@@ -232,6 +237,12 @@ def api_fork_exec():
 def api_lifecycle():
     """Return live process lifecycle rows."""
     return jsonify(store.get_lifecycle(300))
+
+
+@app.route("/api/dead-processes")
+def api_dead_processes():
+    """Return non-running process lifecycle rows."""
+    return jsonify(store.get_dead_processes(300))
 
 
 @app.route("/api/stats")

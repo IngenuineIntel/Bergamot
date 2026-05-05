@@ -524,6 +524,11 @@ class EventStore:
         )
         return ordered[:limit]
 
+    def get_dead_processes(self, limit: int = 200) -> list[dict]:
+        rows = self.get_lifecycle(limit=limit * 4)
+        dead_rows = [row for row in rows if not bool(row.get("running", False))]
+        return dead_rows[:limit]
+
     def get_recent_events(self, limit: int = 200) -> list[dict]:
         with self._lock:
             items = list(self.recent_events)

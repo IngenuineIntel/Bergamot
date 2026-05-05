@@ -34,6 +34,7 @@ const ui = {
   forkBody: document.getElementById("fork-body"),
   forkExecBody: document.getElementById("fork-exec-body"),
   lifecycleBody: document.getElementById("lifecycle-body"),
+  deadProcessesBody: document.getElementById("dead-processes-body"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -45,8 +46,10 @@ const hasSyscallsFeed = Boolean(ui.syscallsBody);
 const hasForkFeed = Boolean(ui.forkBody);
 const hasForkExecFeed = Boolean(ui.forkExecBody);
 const hasLifecycleFeed = Boolean(ui.lifecycleBody);
+const hasDeadProcessesFeed = Boolean(ui.deadProcessesBody);
 
 let lifecycleRefreshTimer = null;
+let deadProcessesRefreshTimer = null;
 
 let epsData = null;
 let epsChart = null;
@@ -331,6 +334,32 @@ function renderLifecycleRows(rows) {
   ui.lifecycleBody.replaceChildren(fragment);
 }
 
+function renderDeadProcessesRows(rows) {
+  if (!ui.deadProcessesBody) return;
+
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${esc(row.pid ?? "")}</td>
+      <td>${esc(row.ppid ?? "")}</td>
+      <td>${esc(row.uid ?? "")}</td>
+      <td>${esc(row.comm ?? "")}</td>
+      <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
+      <td>${row.running ? "yes" : "no"}</td>
+      <td>${esc(row.open_count ?? 0)}</td>
+      <td>${esc(row.connect_count ?? 0)}</td>
+      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>
+    `;
+    fragment.appendChild(tr);
+  });
+
+  ui.deadProcessesBody.replaceChildren(fragment);
+}
+
 async function loadLifecycleSnapshot() {
   if (!hasLifecycleFeed) return;
 
@@ -349,6 +378,24 @@ function scheduleLifecycleRefresh() {
   }, 600);
 }
 
+async function loadDeadProcessesSnapshot() {
+  if (!hasDeadProcessesFeed) return;
+
+  const rows = await fetch("/api/dead-processes")
+    .then((r) => r.json());
+  renderDeadProcessesRows(Array.isArray(rows) ? rows : []);
+}
+
+function scheduleDeadProcessesRefresh() {
+  if (!hasDeadProcessesFeed) return;
+  if (deadProcessesRefreshTimer) return;
+
+  deadProcessesRefreshTimer = setTimeout(() => {
+    deadProcessesRefreshTimer = null;
+    loadDeadProcessesSnapshot().catch(() => {});
+  }, 600);
+}
+
 function ingestEvent(ev) {
   if (hasProcTable && ev?.kind === "proc_snapshot") {
     applyProcessSnapshot(ev);
@@ -362,6 +409,9 @@ function ingestEvent(ev) {
   if (hasForkExecFeed && (ev.type === "fork" || ev.type === "execve")) prependForkExecRow(ev);
   if (hasLifecycleFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
     scheduleLifecycleRefresh();
+  }
+  if (hasDeadProcessesFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+    scheduleDeadProcessesRefresh();
   }
   if (hasSyscallsFeed) prependEventRow(ev);
 }
@@ -438,6 +488,10 @@ async function loadSnapshot() {
     tasks.push(loadLifecycleSnapshot());
   }
 
+  if (hasDeadProcessesFeed) {
+    tasks.push(loadDeadProcessesSnapshot());
+  }
+
   if (hasEps || hasStats) {
     tasks.push(
       fetch("/api/stats")
@@ -454,13 +508,13 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed)) {
     return;
   }
 
   const es = new EventSource("/api/stream");
 
-  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed) {
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed) {
     es.addEventListener("event", (e) => {
       try {
         ingestEvent(JSON.parse(e.data));
@@ -634,7 +688,7 @@ function initResizableTables() {
 
 initResizableTables();
 
-if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed) {
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed) {
   loadSnapshot()
     .then(connectSSE)
     .catch((err) => {
