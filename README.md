@@ -30,7 +30,7 @@ would not be the case. The top level `Makefile` has a handy formula for testing
 every component of the ecosystem:
 
 ```bash
-~$ make bergamot_start
+~$ make universal_start
 ```
 
 This compiles the module, builds virtual environments, installs packages in
@@ -40,7 +40,7 @@ on it, but it doesn't always work and you have to type in the URI yourself.
 Pressing CTRL-C won't stop everything; you'll have to run:
 
 ```bash
-~$ make bergamot_stop
+~$ make universal_stop
 ```
 
 and the programs will be killed and them module unloaded. It'll also clean any
