@@ -166,6 +166,7 @@ class EventStore:
             "ppid": int(ev.get("ppid", 0) or 0),
             "uid": int(ev.get("uid", 0) or 0),
             "type": str(ev.get("type", "") or ""),
+            "subtype": str(ev.get("subtype", "none") or "none"),
             "comm": str(ev.get("comm", "") or ""),
             "arg1": str(ev.get("arg1", ev.get("arg", "")) or ""),
             "arg2": str(ev.get("arg2", "") or ""),
@@ -294,6 +295,7 @@ class EventStore:
 
             ev["ts_s"] = ts_s
             ev["ts_ms"] = ts_ms
+            ev["subtype"] = str(ev.get("subtype", "none") or "none")
 
             comm = ev.get("comm", "")
 

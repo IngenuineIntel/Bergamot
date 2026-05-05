@@ -6,7 +6,7 @@
  * Boundary flow:
  *   1) Kernel syscall path triggers a kprobe handler in this file.
  *   2) Handler checks shared guards (as_ready, as_collecting).
- *   3) Handler calls as_emit_event(type, arg).
+ *   3) Handler calls as_emit_event(type, subtype, arg).
  *   4) allseer.c pushes event to kfifo.
  *   5) Under-Seer drains kfifo entries by reading /proc/all_seer.
  *
@@ -76,7 +76,7 @@ int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
     return 0;
   path[ret] = '\0';
 
-  as_emit_event(AS_TYPE_OPEN, path);
+  as_emit_event(AS_TYPE_OPEN, "none", path);
   return 0;
 }
 #endif /* AS_HOOK_OPEN */
@@ -99,7 +99,7 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs) {
   AS_HOOK_GUARD();
 
   get_task_comm(comm, current);
-  as_emit_event(AS_TYPE_FORK, comm);
+  as_emit_event(AS_TYPE_FORK, "none", comm);
   return 0;
 }
 #endif /* AS_HOOK_FORK */
@@ -131,7 +131,7 @@ int as_probe_execve(struct kprobe *p, struct pt_regs *regs) {
   if (get_kernel_nofault(kpath, &fn->name) || !kpath)
     return 0;
 
-  as_emit_event(AS_TYPE_EXEC, kpath);
+  as_emit_event(AS_TYPE_EXEC, "none", kpath);
   return 0;
 }
 #endif /* AS_HOOK_EXEC */
@@ -193,7 +193,7 @@ int as_probe_connect(struct kprobe *p, struct pt_regs *regs) {
     return 0; /* not a TCP/IP socket we care about */
   }
 
-  as_emit_event(AS_TYPE_CONNECT, arg);
+  as_emit_event(AS_TYPE_CONNECT, "none", arg);
   return 0;
 }
 #endif /* AS_HOOK_CONNECT */

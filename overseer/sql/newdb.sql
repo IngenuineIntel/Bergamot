@@ -20,7 +20,8 @@ CREATE TABLE events (
     pid INTEGER, -- PID
     ppid INTEGER, -- PPID
     uid INTEGER, -- UID
-    type TEXT, -- syscall in question
+    type TEXT, -- syscall (or syscall family) in question
+    subtype TEXT, -- further minutia of the specific syscall
     comm TEXT, -- process command
     arg1 TEXT, -- syscall argument (usually *rdi)
     -- No other implementation of the protocol has `arg2` - but one

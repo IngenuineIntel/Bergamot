@@ -3,7 +3,8 @@
 Syscall wire format (one JSON object per line):
     {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
      "ppid": <int>, "uid": <int>,
-   "type": "open"|"fork"|"exec"|"connect", "comm": "<str>", "arg": "<str>"}
+    "type": "open"|"fork"|"exec"|"connect", "subtype": "<str>",
+    "comm": "<str>", "arg": "<str>"}
 
 Process snapshot wire format (one JSON object per line):
         {"kind": "proc_snapshot", "ts_s": <unix-seconds>, "ts_ms": <0-999>,
@@ -55,20 +56,20 @@ def parse_line(line: str) -> dict | None:
     """
     Parse one space-separated procfs event line.
 
-    Format:  <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>
+    Format:  <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>
 
     The arg field may contain spaces (e.g. command arguments), so we split
-    into at most 7 tokens and treat everything after the 6th token as <arg>.
+    into at most 8 tokens and treat everything after the 7th token as <arg>.
     """
     line = line.strip()
     if not line:
         return None
 
-    parts = line.split(None, 6)          # split on whitespace, max 7 parts
-    if len(parts) < 7:
+    parts = line.split(None, 7)          # split on whitespace, max 8 parts
+    if len(parts) < 8:
         return None
 
-    ts_raw, pid_raw, ppid_raw, uid_raw, type_raw, comm, arg = parts
+    ts_raw, pid_raw, ppid_raw, uid_raw, type_raw, subtype_raw, comm, arg = parts
 
     try:
         ts_ns = int(ts_raw)
@@ -81,6 +82,7 @@ def parse_line(line: str) -> dict | None:
             "ppid": int(ppid_raw),
             "uid":  int(uid_raw),
             "type": type_raw,
+            "subtype": subtype_raw,
             "comm": comm,
             "arg":  arg,
         }

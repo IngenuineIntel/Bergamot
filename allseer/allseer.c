@@ -56,7 +56,8 @@ atomic_t as_ready = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
 /* as_emit_event — called from hooks.c */
-void as_emit_event(enum as_event_type type, const char *arg) {
+void as_emit_event(enum as_event_type type, const char *subtype,
+                   const char *arg) {
   struct as_event ev;
   unsigned long flags;
 
@@ -75,6 +76,8 @@ void as_emit_event(enum as_event_type type, const char *arg) {
   ev.ppid = task_ppid_nr(current);
   ev.uid = from_kuid_munged(&init_user_ns, current_uid());
   ev.type = type;
+  strncpy(ev.subtype, subtype ? subtype : "none", sizeof(ev.subtype) - 1);
+  ev.subtype[sizeof(ev.subtype) - 1] = '\0';
   get_task_comm(ev.comm, current);
   strncpy(ev.arg, arg ? arg : "", sizeof(ev.arg) - 1);
   ev.arg[sizeof(ev.arg) - 1] = '\0';
@@ -240,10 +243,10 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
    * bytes, identical to an empty file.
    *
    * Procfs line contract emitted to Under-Seer:
-   *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
+  *   <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>\n
    *
    * Under-Seer maps these fields into JSON keys:
-  *   ts_s, ts_ms, pid, ppid, uid, type, comm, arg
+  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg
    */
 
   struct as_event ev;
@@ -264,12 +267,12 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     }
     spin_unlock_irqrestore(&as_fifo_lock, flags);
 
-    len = snprintf(line, sizeof(line), "%llu %d %d %u %s %s %s\n",
+    len = snprintf(line, sizeof(line), "%llu %d %d %u %s %s %s %s\n",
                    (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
                    (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
                        ? as_type_str[ev.type]
                        : "unknown",
-                   ev.comm, ev.arg);
+             ev.subtype, ev.comm, ev.arg);
 
     if (len <= 0)
       continue;

@@ -7,7 +7,7 @@
  *      /api/stream with event types: event, stats, ping
  *
  * Payload schemas:
- *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, comm, arg}
+ *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg}
  *   Process snapshots: {kind: "proc_snapshot", ts_s, ts_ms, processes: [...]}
  */
 
