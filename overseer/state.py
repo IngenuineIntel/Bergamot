@@ -17,6 +17,8 @@ __init__ needs to start a SQLite connection whose name will be:
 {UUID}-{UNIXTIME}.db
 """
 
+import os
+import sqlite3
 import threading
 import time
 from collections import deque
@@ -43,6 +45,231 @@ class EventStore:
         # Keep all timestamps within the rolling rate window.
         self._event_timestamps: deque = deque()
         self._rate_window: int       = rate_window
+
+        # SQLite persistence (configured at app startup)
+        self._db_conn: sqlite3.Connection | None = None
+        self._db_path: str | None = None
+        self._db_insert_event_sql: str | None = None
+        self._db_insert_proc_sql: str | None = None
+        self._db_update_proc_seen_sql: str | None = None
+        self._db_update_proc_end_sql: str | None = None
+        self._pending_writes: int = 0
+        self._last_commit_mono: float = time.monotonic()
+
+        # Active process lifecycle row mapping (pid -> procs.id)
+        self._active_proc_row_ids: dict[int, int] = {}
+
+    # ── Persistence setup / teardown ───────────────────────────────────────
+
+    def configure_sqlite(self, db_path: str, sql_dir: str,
+                         db_name: str, db_time: str,
+                         overseer_ver: str):
+        """Initialize per-session SQLite persistence from SQL files."""
+        with self._lock:
+            if self._db_conn is not None:
+                self._close_locked()
+
+            self._db_path = db_path
+            conn = sqlite3.connect(db_path, timeout=5.0, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+
+            newdb_path = os.path.join(sql_dir, "newdb.sql")
+            evententry_path = os.path.join(sql_dir, "evententry.sql")
+            procentry_path = os.path.join(sql_dir, "procentry.sql")
+
+            with open(newdb_path, "r", encoding="utf-8") as f:
+                newdb_sql = f.read()
+
+            self._run_sql_statements_with_named_params(conn, newdb_sql, {
+                "db_name": db_name,
+                "db_time": db_time,
+                "overseer_ver": overseer_ver,
+            })
+
+            with open(evententry_path, "r", encoding="utf-8") as f:
+                self._db_insert_event_sql = f.read().strip()
+
+            with open(procentry_path, "r", encoding="utf-8") as f:
+                proc_sql_chunks = [chunk.strip() for chunk in f.read().split(";") if chunk.strip()]
+
+            if len(proc_sql_chunks) != 3:
+                raise ValueError("procentry.sql must contain exactly 3 SQL statements")
+
+            (self._db_insert_proc_sql,
+             self._db_update_proc_seen_sql,
+             self._db_update_proc_end_sql) = proc_sql_chunks
+
+            conn.commit()
+
+            self._db_conn = conn
+            self._pending_writes = 0
+            self._last_commit_mono = time.monotonic()
+            self._active_proc_row_ids.clear()
+
+    def close(self):
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self):
+        if self._db_conn is None:
+            return
+
+        self._flush_commits_locked(force=True)
+        self._db_conn.close()
+        self._db_conn = None
+        self._db_insert_event_sql = None
+        self._db_insert_proc_sql = None
+        self._db_update_proc_seen_sql = None
+        self._db_update_proc_end_sql = None
+        self._db_path = None
+        self._active_proc_row_ids.clear()
+
+    def _run_sql_statements_with_named_params(self, conn: sqlite3.Connection,
+                                              sql_text: str,
+                                              params: dict[str, str]):
+        for statement in sql_text.split(";"):
+            stmt = statement.strip()
+            if not stmt:
+                continue
+            if ":" in stmt:
+                conn.execute(stmt, params)
+            else:
+                conn.execute(stmt)
+
+    def _flush_commits_locked(self, force: bool = False):
+        if self._db_conn is None or self._pending_writes <= 0:
+            return
+
+        now = time.monotonic()
+        elapsed = now - self._last_commit_mono
+        should_commit = force or (self._pending_writes >= 100 and elapsed >= 2.0)
+        if not should_commit:
+            return
+
+        self._db_conn.commit()
+        self._pending_writes = 0
+        self._last_commit_mono = now
+
+    def _db_write_failed(self, op_name: str, exc: Exception):
+        print(f"[over-seer] db write failed during {op_name}: {exc}", flush=True)
+
+    def _persist_event_locked(self, ev: dict):
+        if self._db_conn is None or not self._db_insert_event_sql:
+            return
+
+        params = {
+            "ts_s": int(ev.get("ts_s", 0) or 0),
+            "ts_ms": int(ev.get("ts_ms", 0) or 0),
+            "pid": int(ev.get("pid", 0) or 0),
+            "ppid": int(ev.get("ppid", 0) or 0),
+            "uid": int(ev.get("uid", 0) or 0),
+            "type": str(ev.get("type", "") or ""),
+            "comm": str(ev.get("comm", "") or ""),
+            "arg1": str(ev.get("arg1", ev.get("arg", "")) or ""),
+            "arg2": str(ev.get("arg2", "") or ""),
+        }
+
+        try:
+            self._db_conn.execute(self._db_insert_event_sql, params)
+            self._pending_writes += 1
+            self._flush_commits_locked(force=False)
+        except sqlite3.Error as exc:
+            self._db_write_failed("event insert", exc)
+
+    def _get_or_create_proc_row_id_locked(self, pid: int, row: dict,
+                                          ts_s: int, ts_ms: int) -> int | None:
+        if self._db_conn is None or self._db_insert_proc_sql is None:
+            return None
+
+        existing_id = self._active_proc_row_ids.get(pid)
+        if existing_id is not None:
+            return existing_id
+
+        params = {
+            "pid": pid,
+            "first_seen_ts_s": ts_s,
+            "first_seen_ts_ms": ts_ms,
+            "last_seen_ts_s": ts_s,
+            "last_seen_ts_ms": ts_ms,
+            "ended_ts_s": None,
+            "ended_ts_ms": None,
+            "first_uid": int(row.get("uid", 0) or 0),
+            "first_ppid": int(row.get("ppid", 0) or 0),
+            "first_comm": str(row.get("comm", "") or ""),
+            "last_uid": int(row.get("uid", 0) or 0),
+            "last_ppid": int(row.get("ppid", 0) or 0),
+            "last_comm": str(row.get("comm", "") or ""),
+        }
+
+        try:
+            cur = self._db_conn.execute(self._db_insert_proc_sql, params)
+            row_id = int(cur.lastrowid)
+            self._active_proc_row_ids[pid] = row_id
+            self._pending_writes += 1
+            return row_id
+        except sqlite3.Error as exc:
+            self._db_write_failed("process start", exc)
+            return None
+
+    def _persist_proc_snapshot_locked(self, ts_s: int, ts_ms: int,
+                                      old_processes: dict[int, dict],
+                                      new_processes: dict[int, dict]):
+        if (
+            self._db_conn is None
+            or self._db_update_proc_seen_sql is None
+            or self._db_update_proc_end_sql is None
+        ):
+            return
+
+        old_pids = set(old_processes.keys())
+        new_pids = set(new_processes.keys())
+
+        # New and still-running process rows refresh last_seen and last_* fields.
+        for pid in new_pids:
+            row = new_processes[pid]
+            row_id = self._get_or_create_proc_row_id_locked(pid, row, ts_s, ts_ms)
+            if row_id is None:
+                continue
+
+            try:
+                self._db_conn.execute(
+                    self._db_update_proc_seen_sql,
+                    {
+                        "id": row_id,
+                        "last_seen_ts_s": ts_s,
+                        "last_seen_ts_ms": ts_ms,
+                        "last_uid": int(row.get("uid", 0) or 0),
+                        "last_ppid": int(row.get("ppid", 0) or 0),
+                        "last_comm": str(row.get("comm", "") or ""),
+                    },
+                )
+                self._pending_writes += 1
+            except sqlite3.Error as exc:
+                self._db_write_failed("process heartbeat", exc)
+
+        # Missing pids are marked as ended at the current snapshot timestamp.
+        disappeared = old_pids - new_pids
+        for pid in disappeared:
+            row_id = self._active_proc_row_ids.get(pid)
+            if row_id is None:
+                continue
+
+            try:
+                self._db_conn.execute(
+                    self._db_update_proc_end_sql,
+                    {
+                        "id": row_id,
+                        "ended_ts_s": ts_s,
+                        "ended_ts_ms": ts_ms,
+                    },
+                )
+                self._active_proc_row_ids.pop(pid, None)
+                self._pending_writes += 1
+            except sqlite3.Error as exc:
+                self._db_write_failed("process end", exc)
+
+        self._flush_commits_locked(force=False)
 
     # ── Ingest ───────────────────────────────────────────────────────────────
 
@@ -94,10 +321,13 @@ class EventStore:
             while self._event_timestamps and self._event_timestamps[0] < cutoff:
                 self._event_timestamps.popleft()
 
+            self._persist_event_locked(ev)
+
     def _apply_process_snapshot_locked(self, snap: dict):
         ts_s = int(snap.get("ts_s", 0) or 0)
         ts_ms = int(snap.get("ts_ms", 0) or 0)
         rows = snap.get("processes", [])
+        old_processes = self.processes
 
         new_processes: dict[int, dict] = {}
         for row in rows:
@@ -126,6 +356,7 @@ class EventStore:
             }
 
         self.processes = new_processes
+        self._persist_proc_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
 
     def agent_connected(self):
         with self._lock:

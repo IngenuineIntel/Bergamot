@@ -10,7 +10,7 @@ CREATE TABLE metadata (
 INSERT INTO metadata (
     db_name, db_time, overseer_ver
 ) VALUES (
-    %s, %s, %s
+    :db_name, :db_time, :overseer_ver
 );
 
 CREATE TABLE events (
@@ -27,3 +27,25 @@ CREATE TABLE events (
     -- day they might
     arg2 TEXT -- syscall argument (usually *rsi)
 );
+
+CREATE TABLE procs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pid INTEGER NOT NULL,
+
+    first_seen_ts_s INTEGER NOT NULL,
+    first_seen_ts_ms INTEGER NOT NULL,
+    last_seen_ts_s INTEGER NOT NULL,
+    last_seen_ts_ms INTEGER NOT NULL,
+    ended_ts_s INTEGER,
+    ended_ts_ms INTEGER,
+
+    first_uid INTEGER,
+    first_ppid INTEGER,
+    first_comm TEXT,
+    last_uid INTEGER,
+    last_ppid INTEGER,
+    last_comm TEXT
+);
+
+CREATE INDEX idx_procs_pid ON procs(pid);
+CREATE INDEX idx_procs_active ON procs(pid, ended_ts_s);

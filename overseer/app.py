@@ -23,12 +23,16 @@ SSE stream (/api/stream):
   events.  Each SSE message is one JSON object on the "event" channel,
   plus periodic "stats" heartbeats every second.
 """
+BERGAMOT_VERSION = "0.1"
 
+import atexit
 import json
 import os
 import queue
+import secrets
 import threading
 import time
+import uuid
 
 from flask import Flask, Response, jsonify, render_template
 
@@ -204,16 +208,45 @@ def api_stats():
 # ── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     def envvar_fetch(name: str, valtype: type, default):
-        try: default = valtype(default)
-        except TypeError: raise AssertionError(
+        try:
+            default = valtype(default)
+        except TypeError:
+            raise AssertionError(
             f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
         )
-        try: return valtype(os.environ[str])
-        except: return default
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        try:
+            return valtype(raw)
+        except Exception:
+            return default
 
     tcp_port = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
     http_host = "0.0.0.0"
     http_port = envvar_fetch("BERGAMOT_HTTP_PORT", int, 27960)
+
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    db_base_dir = os.environ.get("BERGAMOT_SQL_PATH", os.path.join(app_dir, "db"))
+    sql_dir = os.path.join(app_dir, "sql")
+
+    os.makedirs(db_base_dir, exist_ok=True)
+
+    session_uuid = uuid.uuid4().hex
+    session_salt = secrets.token_hex(4)
+    session_start_unix = int(time.time())
+    session_name = f"{session_uuid}-{session_salt}-{session_start_unix}.db"
+    session_db_path = os.path.join(db_base_dir, session_name)
+
+    store.configure_sqlite(
+        db_path=session_db_path,
+        sql_dir=sql_dir,
+        db_name=session_name,
+        db_time=str(session_start_unix),
+        overseer_ver=BERGAMOT_VERSION,
+    )
+    atexit.register(store.close)
+    print(f"[over-seer] session db initialized at {session_db_path}", flush=True)
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)

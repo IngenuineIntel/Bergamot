@@ -11,6 +11,7 @@ IN THIS DIR
 ---
 
  - `newdb.sql` - Initializes the database
- - `dbentry.sql` - Inserts events
+ - `evententry.sql` - Inserts events
+ - `procentry.sql` - Inserts and updates process lifecycle rows
 
 ##### TODO

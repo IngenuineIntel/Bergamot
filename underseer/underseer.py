@@ -10,6 +10,7 @@ Process snapshot wire format (one JSON object per line):
          "processes": [{"pid": <int>, "ppid": <int>, "uid": <int>,
                                         "comm": "<str>", "threads": <int>}, ...]}
 """
+BERGAMOT_VERSION = "0.1"
 
 import contextlib
 import json
