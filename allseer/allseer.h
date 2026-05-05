@@ -29,7 +29,6 @@
 enum as_event_type {
   AS_TYPE_OPEN = 0,
   AS_TYPE_FORK,
-  AS_TYPE_EXEC,
   AS_TYPE_CONNECT,
 };
 

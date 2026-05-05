@@ -31,7 +31,7 @@ const ui = {
   openBody: document.getElementById("open-body"),
   netBody: document.getElementById("net-body"),
   syscallsBody: document.getElementById("syscalls-body"),
-  execForkBody: document.getElementById("exec-fork-body"),
+  forkBody: document.getElementById("fork-body"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -40,7 +40,7 @@ const hasProcTable = Boolean(ui.procBody);
 const hasOpenFeed = Boolean(ui.openBody);
 const hasNetworkFeed = Boolean(ui.netBody);
 const hasSyscallsFeed = Boolean(ui.syscallsBody);
-const hasExecForkFeed = Boolean(ui.execForkBody);
+const hasForkFeed = Boolean(ui.forkBody);
 
 let epsData = null;
 let epsChart = null;
@@ -260,8 +260,8 @@ function prependEventRow(ev) {
   }
 }
 
-function prependExecForkRow(ev) {
-  if (!ui.execForkBody || !ev || typeof ev !== "object") return;
+function prependForkRow(ev) {
+  if (!ui.forkBody || !ev || typeof ev !== "object") return;
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
@@ -269,14 +269,13 @@ function prependExecForkRow(ev) {
     <td>${esc(ev.pid ?? "")}</td>
     <td>${esc(ev.ppid ?? "")}</td>
     <td>${esc(ev.uid ?? "")}</td>
-    <td>${esc(ev.type ?? "")}</td>
     <td>${esc(ev.comm ?? "")}</td>
     <td class="arg-cell">${esc(ev.arg ?? "")}</td>
   `;
-  ui.execForkBody.insertBefore(tr, ui.execForkBody.firstChild);
+  ui.forkBody.insertBefore(tr, ui.forkBody.firstChild);
 
-  while (ui.execForkBody.rows.length > MAX_FEED_ROWS) {
-    ui.execForkBody.deleteRow(ui.execForkBody.rows.length - 1);
+  while (ui.forkBody.rows.length > MAX_FEED_ROWS) {
+    ui.forkBody.deleteRow(ui.forkBody.rows.length - 1);
   }
 }
 
@@ -289,7 +288,7 @@ function ingestEvent(ev) {
 
   if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
-  if (hasExecForkFeed && (ev.type === "exec" || ev.type === "fork")) prependExecForkRow(ev);
+  if (hasForkFeed && ev.type === "fork") prependForkRow(ev);
   if (hasSyscallsFeed) prependEventRow(ev);
 }
 
@@ -341,12 +340,12 @@ async function loadSnapshot() {
     );
   }
 
-  if (hasExecForkFeed) {
+  if (hasForkFeed) {
     tasks.push(
-      fetch("/api/exec_fork")
+      fetch("/api/fork")
         .then((r) => r.json())
         .then((items) => {
-          [...items].reverse().forEach((ev) => prependExecForkRow(ev));
+          [...items].reverse().forEach((ev) => prependForkRow(ev));
         })
     );
   }
@@ -367,7 +366,7 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasExecForkFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed)) {
     return;
   }
 

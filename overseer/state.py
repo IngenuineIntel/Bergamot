@@ -35,7 +35,7 @@ class EventStore:
         # Scrolling logs
         self.file_opens: deque = deque(maxlen=max_file_opens)
         self.network:    deque = deque(maxlen=max_network)
-        self.exec_fork:  deque = deque(maxlen=1000)
+        self.fork_events: deque = deque(maxlen=1000)
 
         # All recent events (combined) for the /api/events endpoint
         self.recent_events: deque = deque(maxlen=2000)
@@ -315,8 +315,8 @@ class EventStore:
                 self.file_opens.append(record)
             elif ev_type == "connect":
                 self.network.append(record)
-            elif ev_type in ("exec", "fork"):
-                self.exec_fork.append({
+            elif ev_type == "fork":
+                self.fork_events.append({
                     "ts_s":  ts_s,
                     "ts_ms": ts_ms,
                     "pid":   pid,
@@ -396,9 +396,9 @@ class EventStore:
             items = list(self.network)
         return items[-limit:]
 
-    def get_exec_fork(self, limit: int = 200) -> list[dict]:
+    def get_fork(self, limit: int = 200) -> list[dict]:
         with self._lock:
-            items = list(self.exec_fork)
+            items = list(self.fork_events)
         return items[-limit:]
 
     def get_recent_events(self, limit: int = 200) -> list[dict]:

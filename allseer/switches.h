@@ -8,7 +8,6 @@
 /* ── HOOK SWITCHES ──────────────────────────────────────────────────────── */
 #define AS_HOOK_OPEN 1
 #define AS_HOOK_FORK 1
-#define AS_HOOK_EXEC 1
 #define AS_HOOK_CONNECT 1
 
 /*

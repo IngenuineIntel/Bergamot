@@ -105,38 +105,6 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs) {
 #endif /* AS_HOOK_FORK */
 
 /* ════════════════════════════════════════════════════════════════════════════
- * HOOK: exec (do_execveat_common)
- * Captures execve / execveat.
- *
- * Argument layout:
- *   rdi = int fd, rsi = struct filename *filename,
- *   rdx = struct user_arg_ptr argv, rcx = struct user_arg_ptr envp,
- *   r8  = int flags
- * ═════════════════════════════════════════════════════════════════════════ */
-#if AS_HOOK_EXEC
-int as_probe_execve(struct kprobe *p, struct pt_regs *regs) {
-  /*
-   * regs->si holds a 'struct filename *'.  The first field of that
-   * struct is 'const char *name', pointing to the resolved path.
-   * We dereference it safely with get_kernel_nofault.
-   */
-  struct filename *fn = (struct filename *)(regs->si);
-  const char *kpath = NULL;
-
-  AS_HOOK_GUARD();
-
-  if (!fn)
-    return 0;
-
-  if (get_kernel_nofault(kpath, &fn->name) || !kpath)
-    return 0;
-
-  as_emit_event(AS_TYPE_EXEC, "none", kpath);
-  return 0;
-}
-#endif /* AS_HOOK_EXEC */
-
-/* ════════════════════════════════════════════════════════════════════════════
  * HOOK: connect  (tcp_connect)
  * Captures outbound TCP connections (tcp_connect).
  * Argument layout:

@@ -205,7 +205,6 @@ static bool as_claim_owner_if_unset(void) {
 static const char *const as_type_str[] = {
     [AS_TYPE_OPEN] = "open",
     [AS_TYPE_FORK] = "fork",
-    [AS_TYPE_EXEC] = "exec",
     [AS_TYPE_CONNECT] = "connect",
 };
 
@@ -312,10 +311,6 @@ extern int as_probe_openat2(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_EXEC
-extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
-#endif
-
 #if AS_HOOK_CONNECT
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
 #endif
@@ -331,12 +326,6 @@ static struct kprobe as_kprobes[] = {
     {
         .symbol_name = "kernel_clone",
         .pre_handler = as_probe_clone,
-    },
-#endif
-#if AS_HOOK_EXEC
-    {
-        .symbol_name = "__x64_sys_execveat",
-        .pre_handler = as_probe_execve,
     },
 #endif
 #if AS_HOOK_CONNECT
