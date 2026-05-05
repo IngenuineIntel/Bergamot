@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
 
 from server import start_tcp_server
 from state import store
@@ -241,8 +241,19 @@ def api_lifecycle():
 
 @app.route("/api/dead-processes")
 def api_dead_processes():
-    """Return non-running process lifecycle rows."""
-    return jsonify(store.get_dead_processes(300))
+    """Return non-running lifecycle rows; supports limit/offset paging."""
+    raw_limit = request.args.get("limit", default=None, type=int)
+    raw_offset = request.args.get("offset", default=0, type=int)
+
+    # Default remains full archive to preserve existing UI behavior.
+    limit = raw_limit
+    if limit is not None:
+        limit = max(1, min(limit, 5000))
+
+    offset = max(0, raw_offset)
+
+    rows = store.get_dead_processes(limit=limit, offset=offset)
+    return jsonify(rows)
 
 
 @app.route("/api/stats")

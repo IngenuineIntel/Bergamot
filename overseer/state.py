@@ -62,6 +62,12 @@ class EventStore:
         # Active process lifecycle row mapping (pid -> procs.id)
         self._active_proc_row_ids: dict[int, int] = {}
 
+        # Lifecycle tracking for UI/API snapshots.
+        # Active rows are keyed by pid; completed rows are archived in
+        # _dead_lifecycle_rows so they remain visible even when recent_events rolls.
+        self._active_lifecycle_rows: dict[int, dict] = {}
+        self._dead_lifecycle_rows: deque = deque()
+
     # ── Persistence setup / teardown ───────────────────────────────────────
 
     def configure_sqlite(self, db_path: str, sql_dir: str,
@@ -153,6 +159,102 @@ class EventStore:
         self._db_conn.commit()
         self._pending_writes = 0
         self._last_commit_mono = now
+
+    def _new_lifecycle_row(self, pid: int, ppid: int, uid: int,
+                           comm: str, ts_s: int, ts_ms: int,
+                           running: bool) -> dict:
+        return {
+            "pid": pid,
+            "ppid": ppid,
+            "uid": uid,
+            "comm": comm,
+            "exec_arg": "",
+            "fork_seen": False,
+            "exec_seen": False,
+            "open_count": 0,
+            "connect_count": 0,
+            "first_open": "",
+            "first_connect": "",
+            "start_ts_s": ts_s,
+            "start_ts_ms": ts_ms,
+            "last_ts_s": ts_s,
+            "last_ts_ms": ts_ms,
+            "running": bool(running),
+        }
+
+    def _update_lifecycle_row_from_event(self, row: dict, ev: dict,
+                                         ts_s: int, ts_ms: int):
+        row["ppid"] = int(ev.get("ppid", row["ppid"]) or 0)
+        row["uid"] = int(ev.get("uid", row["uid"]) or 0)
+
+        comm_val = str(ev.get("comm", row["comm"]) or row["comm"])
+        row["comm"] = comm_val
+
+        if (ts_s, ts_ms) < (row["start_ts_s"], row["start_ts_ms"]):
+            row["start_ts_s"] = ts_s
+            row["start_ts_ms"] = ts_ms
+
+        if (ts_s, ts_ms) >= (row["last_ts_s"], row["last_ts_ms"]):
+            row["last_ts_s"] = ts_s
+            row["last_ts_ms"] = ts_ms
+
+        ev_type = str(ev.get("type", "") or "")
+        if ev_type == "fork":
+            row["fork_seen"] = True
+        elif ev_type == "execve":
+            row["exec_seen"] = True
+            row["exec_arg"] = str(ev.get("arg", "") or "")
+        elif ev_type == "open":
+            row["open_count"] += 1
+            if not row["first_open"]:
+                row["first_open"] = str(ev.get("arg", "") or "")
+        elif ev_type == "connect":
+            row["connect_count"] += 1
+            if not row["first_connect"]:
+                row["first_connect"] = str(ev.get("arg", "") or "")
+
+    def _mark_lifecycle_rows_from_snapshot_locked(self, ts_s: int, ts_ms: int,
+                                                  old_processes: dict[int, dict],
+                                                  new_processes: dict[int, dict]):
+        old_pids = set(old_processes.keys())
+        new_pids = set(new_processes.keys())
+
+        # Processes that disappeared from the latest snapshot are archived as dead.
+        for pid in old_pids - new_pids:
+            row = self._active_lifecycle_rows.pop(pid, None)
+            if row is None:
+                continue
+
+            if (ts_s, ts_ms) > (row["last_ts_s"], row["last_ts_ms"]):
+                row["last_ts_s"] = ts_s
+                row["last_ts_ms"] = ts_ms
+            row["running"] = False
+            self._dead_lifecycle_rows.appendleft(row)
+
+        # New or still-running processes are represented in active rows.
+        for pid in new_pids:
+            proc = new_processes[pid]
+            row = self._active_lifecycle_rows.get(pid)
+
+            if row is None:
+                row = self._new_lifecycle_row(
+                    pid=pid,
+                    ppid=int(proc.get("ppid", 0) or 0),
+                    uid=int(proc.get("uid", 0) or 0),
+                    comm=str(proc.get("comm", "") or ""),
+                    ts_s=ts_s,
+                    ts_ms=ts_ms,
+                    running=True,
+                )
+                self._active_lifecycle_rows[pid] = row
+            else:
+                row["running"] = True
+                row["ppid"] = int(proc.get("ppid", row["ppid"]) or row["ppid"])
+                row["uid"] = int(proc.get("uid", row["uid"]) or row["uid"])
+                row["comm"] = str(proc.get("comm", row["comm"]) or row["comm"])
+                if (ts_s, ts_ms) > (row["last_ts_s"], row["last_ts_ms"]):
+                    row["last_ts_s"] = ts_s
+                    row["last_ts_ms"] = ts_ms
 
     def _db_write_failed(self, op_name: str, exc: Exception):
         print(f"[over-seer] db write failed during {op_name}: {exc}", flush=True)
@@ -354,6 +456,23 @@ class EventStore:
             while self._event_timestamps and self._event_timestamps[0] < cutoff:
                 self._event_timestamps.popleft()
 
+            if pid > 0:
+                row = self._active_lifecycle_rows.get(pid)
+                if row is None:
+                    row = self._new_lifecycle_row(
+                        pid=pid,
+                        ppid=int(ev.get("ppid", 0) or 0),
+                        uid=int(ev.get("uid", 0) or 0),
+                        comm=str(ev.get("comm", "") or ""),
+                        ts_s=ts_s,
+                        ts_ms=ts_ms,
+                        running=pid in self.processes,
+                    )
+                    self._active_lifecycle_rows[pid] = row
+
+                self._update_lifecycle_row_from_event(row, ev, ts_s, ts_ms)
+                row["running"] = pid in self.processes
+
             self._persist_event_locked(ev)
 
     def _apply_process_snapshot_locked(self, snap: dict):
@@ -389,6 +508,7 @@ class EventStore:
             }
 
         self.processes = new_processes
+        self._mark_lifecycle_rows_from_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
         self._persist_proc_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
 
     def agent_connected(self):
@@ -432,102 +552,38 @@ class EventStore:
 
     def get_lifecycle(self, limit: int = 200) -> list[dict]:
         with self._lock:
-            events = list(self.recent_events)
-            processes = dict(self.processes)
-
-        sessions: dict[int, dict] = {}
-        for ev in events:
-            if not isinstance(ev, dict):
-                continue
-            if ev.get("kind") == "proc_snapshot":
-                continue
-
-            try:
-                pid = int(ev.get("pid", 0) or 0)
-            except (TypeError, ValueError):
-                continue
-
-            if pid <= 0:
-                continue
-
-            ts_s = int(ev.get("ts_s", 0) or 0)
-            ts_ms = int(ev.get("ts_ms", 0) or 0)
-            ev_type = str(ev.get("type", "") or "")
-
-            row = sessions.get(pid)
-            if row is None:
-                row = {
-                    "pid": pid,
-                    "ppid": int(ev.get("ppid", 0) or 0),
-                    "uid": int(ev.get("uid", 0) or 0),
-                    "comm": str(ev.get("comm", "") or ""),
-                    "exec_arg": "",
-                    "fork_seen": False,
-                    "exec_seen": False,
-                    "open_count": 0,
-                    "connect_count": 0,
-                    "first_open": "",
-                    "first_connect": "",
-                    "start_ts_s": ts_s,
-                    "start_ts_ms": ts_ms,
-                    "last_ts_s": ts_s,
-                    "last_ts_ms": ts_ms,
-                    "running": False,
-                }
-                sessions[pid] = row
-
-            row["ppid"] = int(ev.get("ppid", row["ppid"]) or 0)
-            row["uid"] = int(ev.get("uid", row["uid"]) or 0)
-            row["comm"] = str(ev.get("comm", row["comm"]) or row["comm"])
-
-            if (ts_s, ts_ms) < (row["start_ts_s"], row["start_ts_ms"]):
-                row["start_ts_s"] = ts_s
-                row["start_ts_ms"] = ts_ms
-
-            if (ts_s, ts_ms) >= (row["last_ts_s"], row["last_ts_ms"]):
-                row["last_ts_s"] = ts_s
-                row["last_ts_ms"] = ts_ms
-
-            if ev_type == "fork":
-                row["fork_seen"] = True
-            elif ev_type == "execve":
-                row["exec_seen"] = True
-                row["exec_arg"] = str(ev.get("arg", "") or "")
-            elif ev_type == "open":
-                row["open_count"] += 1
-                if not row["first_open"]:
-                    row["first_open"] = str(ev.get("arg", "") or "")
-            elif ev_type == "connect":
-                row["connect_count"] += 1
-                if not row["first_connect"]:
-                    row["first_connect"] = str(ev.get("arg", "") or "")
-
-        for pid, proc in processes.items():
-            row = sessions.get(pid)
-            if row is None:
-                continue
-            row["running"] = True
-            row["ppid"] = int(proc.get("ppid", row["ppid"]) or row["ppid"])
-            row["uid"] = int(proc.get("uid", row["uid"]) or row["uid"])
-            row["comm"] = str(proc.get("comm", row["comm"]) or row["comm"])
-
-            last_seen_s = int(proc.get("last_seen_s", row["last_ts_s"]) or row["last_ts_s"])
-            last_seen_ms = int(proc.get("last_seen_ms", row["last_ts_ms"]) or row["last_ts_ms"])
-            if (last_seen_s, last_seen_ms) > (row["last_ts_s"], row["last_ts_ms"]):
-                row["last_ts_s"] = last_seen_s
-                row["last_ts_ms"] = last_seen_ms
+            active_rows = [dict(row) for row in self._active_lifecycle_rows.values()]
+            dead_rows = [dict(row) for row in self._dead_lifecycle_rows]
 
         ordered = sorted(
-            sessions.values(),
+            active_rows + dead_rows,
             key=lambda r: (r["last_ts_s"], r["last_ts_ms"], r["pid"]),
             reverse=True,
         )
         return ordered[:limit]
 
-    def get_dead_processes(self, limit: int = 200) -> list[dict]:
-        rows = self.get_lifecycle(limit=limit * 4)
-        dead_rows = [row for row in rows if not bool(row.get("running", False))]
-        return dead_rows[:limit]
+    def get_dead_processes(self, limit: int | None = None, offset: int = 0) -> list[dict]:
+        with self._lock:
+            dead_rows = [dict(row) for row in self._dead_lifecycle_rows]
+
+        ordered = sorted(
+            dead_rows,
+            key=lambda r: (r["last_ts_s"], r["last_ts_ms"], r["pid"]),
+            reverse=True,
+        )
+        if offset < 0:
+            offset = 0
+
+        if offset >= len(ordered):
+            return []
+
+        if limit is None:
+            return ordered[offset:]
+
+        if limit <= 0:
+            return []
+
+        return ordered[offset:offset + limit]
 
     def get_recent_events(self, limit: int = 200) -> list[dict]:
         with self._lock:

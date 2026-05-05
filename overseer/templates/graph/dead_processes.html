@@ -10,6 +10,18 @@
   <main>
     <section class="card full-width">
       <h2>Dead Processes</h2>
+      <div class="table-toolbar" aria-label="Dead processes paging controls">
+        <button id="dead-processes-prev" class="pager-btn" type="button">Prev</button>
+        <button id="dead-processes-next" class="pager-btn" type="button">Next</button>
+        <label class="pager-size-label" for="dead-processes-page-size">Rows</label>
+        <select id="dead-processes-page-size" class="pager-select" aria-label="Dead processes rows per page">
+          <option value="100">100</option>
+          <option value="300" selected>300</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+        <span id="dead-processes-page-info" class="pager-status">Page 1</span>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>

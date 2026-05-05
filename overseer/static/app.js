@@ -35,6 +35,10 @@ const ui = {
   forkExecBody: document.getElementById("fork-exec-body"),
   lifecycleBody: document.getElementById("lifecycle-body"),
   deadProcessesBody: document.getElementById("dead-processes-body"),
+  deadProcessesPrev: document.getElementById("dead-processes-prev"),
+  deadProcessesNext: document.getElementById("dead-processes-next"),
+  deadProcessesPageSize: document.getElementById("dead-processes-page-size"),
+  deadProcessesPageInfo: document.getElementById("dead-processes-page-info"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -50,6 +54,12 @@ const hasDeadProcessesFeed = Boolean(ui.deadProcessesBody);
 
 let lifecycleRefreshTimer = null;
 let deadProcessesRefreshTimer = null;
+
+const deadPaging = {
+  page: 0,
+  pageSize: 300,
+  hasMore: false,
+};
 
 const PROCESS_PANEL_CURSOR_OFFSET_PX = 18;
 const PROCESS_PANEL_VIEWPORT_PADDING_PX = 12;
@@ -543,6 +553,36 @@ function renderDeadProcessesRows(rows) {
   syncProcessPanelAfterRowsRender();
 }
 
+function hasDeadPagingControls() {
+  return Boolean(
+    ui.deadProcessesPrev
+    && ui.deadProcessesNext
+    && ui.deadProcessesPageInfo
+    && ui.deadProcessesPageSize
+  );
+}
+
+function updateDeadPagingControls() {
+  if (!hasDeadPagingControls()) return;
+
+  const pageLabel = deadPaging.page + 1;
+  ui.deadProcessesPageInfo.textContent = `Page ${pageLabel}`;
+  ui.deadProcessesPrev.disabled = deadPaging.page <= 0;
+  ui.deadProcessesNext.disabled = !deadPaging.hasMore;
+  ui.deadProcessesPageSize.value = String(deadPaging.pageSize);
+}
+
+function deadProcessesUrl() {
+  if (!hasDeadPagingControls()) {
+    return "/api/dead-processes";
+  }
+
+  const params = new URLSearchParams();
+  params.set("limit", String(deadPaging.pageSize));
+  params.set("offset", String(deadPaging.page * deadPaging.pageSize));
+  return `/api/dead-processes?${params.toString()}`;
+}
+
 async function loadLifecycleSnapshot() {
   if (!hasLifecycleFeed) return;
 
@@ -564,9 +604,15 @@ function scheduleLifecycleRefresh() {
 async function loadDeadProcessesSnapshot() {
   if (!hasDeadProcessesFeed) return;
 
-  const rows = await fetch("/api/dead-processes")
+  const rows = await fetch(deadProcessesUrl())
     .then((r) => r.json());
-  renderDeadProcessesRows(Array.isArray(rows) ? rows : []);
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  renderDeadProcessesRows(normalizedRows);
+
+  if (hasDeadPagingControls()) {
+    deadPaging.hasMore = normalizedRows.length >= deadPaging.pageSize;
+    updateDeadPagingControls();
+  }
 }
 
 function scheduleDeadProcessesRefresh() {
@@ -577,6 +623,50 @@ function scheduleDeadProcessesRefresh() {
     deadProcessesRefreshTimer = null;
     loadDeadProcessesSnapshot().catch(() => {});
   }, 600);
+}
+
+function changeDeadProcessesPage(nextPage) {
+  const safePage = Math.max(0, nextPage);
+  if (safePage === deadPaging.page) return;
+
+  deadPaging.page = safePage;
+  updateDeadPagingControls();
+  loadDeadProcessesSnapshot().catch(() => {});
+}
+
+function changeDeadProcessesPageSize(nextPageSize) {
+  const parsed = Number(nextPageSize);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+  if (parsed === deadPaging.pageSize) return;
+
+  deadPaging.pageSize = parsed;
+  deadPaging.page = 0;
+  updateDeadPagingControls();
+  loadDeadProcessesSnapshot().catch(() => {});
+}
+
+function initDeadProcessesControls() {
+  if (!hasDeadPagingControls()) return;
+
+  const initialPageSize = Number(ui.deadProcessesPageSize.value);
+  if (Number.isFinite(initialPageSize) && initialPageSize > 0) {
+    deadPaging.pageSize = initialPageSize;
+  }
+
+  ui.deadProcessesPrev.addEventListener("click", () => {
+    changeDeadProcessesPage(deadPaging.page - 1);
+  });
+
+  ui.deadProcessesNext.addEventListener("click", () => {
+    if (!deadPaging.hasMore) return;
+    changeDeadProcessesPage(deadPaging.page + 1);
+  });
+
+  ui.deadProcessesPageSize.addEventListener("change", () => {
+    changeDeadProcessesPageSize(ui.deadProcessesPageSize.value);
+  });
+
+  updateDeadPagingControls();
 }
 
 function ingestEvent(ev) {
@@ -870,6 +960,7 @@ function initResizableTables() {
 // --- Boot --------------------------------------------------------------------
 
 initResizableTables();
+initDeadProcessesControls();
 
 window.addEventListener("resize", () => {
   scheduleProcessPanelPositionUpdate();
