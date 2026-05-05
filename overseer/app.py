@@ -130,6 +130,11 @@ def graph_fork():
     return render_template("graph/fork.html")
 
 
+@app.route("/graph/fork-exec")
+def graph_fork_exec():
+    return render_template("graph/fork_exec.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """
@@ -209,6 +214,18 @@ def api_network():
 def api_fork():
     """Return the last 200 fork events."""
     return jsonify(store.get_fork(200))
+
+
+@app.route("/api/execve")
+def api_execve():
+    """Return the last 200 execve events."""
+    return jsonify(store.get_execve(200))
+
+
+@app.route("/api/fork-exec")
+def api_fork_exec():
+    """Return the last 300 mixed fork+execve events."""
+    return jsonify(store.get_fork_exec(300))
 
 
 @app.route("/api/stats")

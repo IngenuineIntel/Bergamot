@@ -32,6 +32,7 @@ const ui = {
   netBody: document.getElementById("net-body"),
   syscallsBody: document.getElementById("syscalls-body"),
   forkBody: document.getElementById("fork-body"),
+  forkExecBody: document.getElementById("fork-exec-body"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -41,6 +42,7 @@ const hasOpenFeed = Boolean(ui.openBody);
 const hasNetworkFeed = Boolean(ui.netBody);
 const hasSyscallsFeed = Boolean(ui.syscallsBody);
 const hasForkFeed = Boolean(ui.forkBody);
+const hasForkExecFeed = Boolean(ui.forkExecBody);
 
 let epsData = null;
 let epsChart = null;
@@ -279,6 +281,26 @@ function prependForkRow(ev) {
   }
 }
 
+function prependForkExecRow(ev) {
+  if (!ui.forkExecBody || !ev || typeof ev !== "object") return;
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${esc(ev.type ?? "")}</td>
+    <td>${esc(ev.pid ?? "")}</td>
+    <td>${esc(ev.ppid ?? "")}</td>
+    <td>${esc(ev.uid ?? "")}</td>
+    <td>${esc(ev.comm ?? "")}</td>
+    <td class="arg-cell">${esc(ev.arg ?? "")}</td>
+  `;
+  ui.forkExecBody.insertBefore(tr, ui.forkExecBody.firstChild);
+
+  while (ui.forkExecBody.rows.length > MAX_FEED_ROWS) {
+    ui.forkExecBody.deleteRow(ui.forkExecBody.rows.length - 1);
+  }
+}
+
 function ingestEvent(ev) {
   if (hasProcTable && ev?.kind === "proc_snapshot") {
     applyProcessSnapshot(ev);
@@ -289,6 +311,7 @@ function ingestEvent(ev) {
   if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
   if (hasForkFeed && ev.type === "fork") prependForkRow(ev);
+  if (hasForkExecFeed && (ev.type === "fork" || ev.type === "execve")) prependForkExecRow(ev);
   if (hasSyscallsFeed) prependEventRow(ev);
 }
 
@@ -350,6 +373,16 @@ async function loadSnapshot() {
     );
   }
 
+  if (hasForkExecFeed) {
+    tasks.push(
+      fetch("/api/fork-exec")
+        .then((r) => r.json())
+        .then((items) => {
+          [...items].reverse().forEach((ev) => prependForkExecRow(ev));
+        })
+    );
+  }
+
   if (hasEps || hasStats) {
     tasks.push(
       fetch("/api/stats")
@@ -366,13 +399,13 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed)) {
     return;
   }
 
   const es = new EventSource("/api/stream");
 
-  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed) {
     es.addEventListener("event", (e) => {
       try {
         ingestEvent(JSON.parse(e.data));
@@ -546,7 +579,7 @@ function initResizableTables() {
 
 initResizableTables();
 
-if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed) {
   loadSnapshot()
     .then(connectSSE)
     .catch((err) => {

@@ -36,6 +36,8 @@ class EventStore:
         self.file_opens: deque = deque(maxlen=max_file_opens)
         self.network:    deque = deque(maxlen=max_network)
         self.fork_events: deque = deque(maxlen=1000)
+        self.execve_events: deque = deque(maxlen=1000)
+        self.fork_exec_events: deque = deque(maxlen=1500)
 
         # All recent events (combined) for the /api/events endpoint
         self.recent_events: deque = deque(maxlen=2000)
@@ -306,6 +308,8 @@ class EventStore:
                 "ts_s": ts_s,
                 "ts_ms": ts_ms,
                 "pid":  pid,
+                "ppid": ev.get("ppid", 0),
+                "uid": ev.get("uid", 0),
                 "comm": comm,
                 "arg":  arg,
                 "type": ev_type,
@@ -316,7 +320,7 @@ class EventStore:
             elif ev_type == "connect":
                 self.network.append(record)
             elif ev_type == "fork":
-                self.fork_events.append({
+                fork_record = {
                     "ts_s":  ts_s,
                     "ts_ms": ts_ms,
                     "pid":   pid,
@@ -325,7 +329,22 @@ class EventStore:
                     "type":  ev_type,
                     "comm":  comm,
                     "arg":   arg,
-                })
+                }
+                self.fork_events.append(fork_record)
+                self.fork_exec_events.append(fork_record)
+            elif ev_type == "execve":
+                exec_record = {
+                    "ts_s":  ts_s,
+                    "ts_ms": ts_ms,
+                    "pid":   pid,
+                    "ppid":  ev.get("ppid", 0),
+                    "uid":   ev.get("uid", 0),
+                    "type":  ev_type,
+                    "comm":  comm,
+                    "arg":   arg,
+                }
+                self.execve_events.append(exec_record)
+                self.fork_exec_events.append(exec_record)
 
             self.recent_events.append(ev)
             now = time.monotonic()
@@ -399,6 +418,16 @@ class EventStore:
     def get_fork(self, limit: int = 200) -> list[dict]:
         with self._lock:
             items = list(self.fork_events)
+        return items[-limit:]
+
+    def get_execve(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            items = list(self.execve_events)
+        return items[-limit:]
+
+    def get_fork_exec(self, limit: int = 300) -> list[dict]:
+        with self._lock:
+            items = list(self.fork_exec_events)
         return items[-limit:]
 
     def get_recent_events(self, limit: int = 200) -> list[dict]:

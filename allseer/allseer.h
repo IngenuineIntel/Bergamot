@@ -30,6 +30,7 @@ enum as_event_type {
   AS_TYPE_OPEN = 0,
   AS_TYPE_FORK,
   AS_TYPE_CONNECT,
+  AS_TYPE_EXECVE,
 };
 
 /* ── Event struct ────────────────────────────────────────────────────── */

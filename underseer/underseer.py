@@ -3,7 +3,7 @@
 Syscall wire format (one JSON object per line):
     {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
      "ppid": <int>, "uid": <int>,
-    "type": "open"|"fork"|"connect", "subtype": "<str>",
+    "type": "open"|"fork"|"connect"|"execve", "subtype": "<str>",
     "comm": "<str>", "arg": "<str>"}
 
 Process snapshot wire format (one JSON object per line):
@@ -49,7 +49,7 @@ WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
-_TYPE_NAMES = ("open", "fork", "connect")
+_TYPE_NAMES = ("open", "fork", "connect", "execve")
 
 
 def parse_line(line: str) -> dict | None:

@@ -206,6 +206,7 @@ static const char *const as_type_str[] = {
     [AS_TYPE_OPEN] = "open",
     [AS_TYPE_FORK] = "fork",
     [AS_TYPE_CONNECT] = "connect",
+  [AS_TYPE_EXECVE] = "execve",
 };
 
 /*
@@ -315,6 +316,17 @@ extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
 #endif
 
+#if AS_HOOK_EXECVE
+extern int as_probe_execveat_common(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_execve(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_execveat(struct kprobe *p, struct pt_regs *regs);
+
+static struct kprobe as_execve_probe;
+static bool as_execve_probe_registered;
+static const char *as_execve_probe_symbol;
+#endif
+
 static struct kprobe as_kprobes[] = {
 #if AS_HOOK_OPEN
     {
@@ -370,12 +382,50 @@ static int __init allseer_init(void) {
     }
   }
 
+#if AS_HOOK_EXECVE
+  {
+    struct {
+      const char *symbol;
+      kprobe_pre_handler_t handler;
+    } execve_candidates[] = {
+      {.symbol = "__x64_sys_execve", .handler = as_probe_x64_sys_execve},
+      {.symbol = "__x64_sys_execveat", .handler = as_probe_x64_sys_execveat},
+        {.symbol = "do_execveat_common", .handler = as_probe_execveat_common},
+      {.symbol = "do_execveat_common.isra.0", .handler = as_probe_execveat_common},
+        {.symbol = "do_execve", .handler = as_probe_execve},
+    };
+    int j;
+
+    as_execve_probe_registered = false;
+    as_execve_probe_symbol = NULL;
+
+    for (j = 0; j < ARRAY_SIZE(execve_candidates); j++) {
+      as_execve_probe.symbol_name = execve_candidates[j].symbol;
+      as_execve_probe.pre_handler = execve_candidates[j].handler;
+      as_execve_probe.post_handler = NULL;
+
+      ret = register_kprobe(&as_execve_probe);
+      if (ret == 0) {
+        as_execve_probe_registered = true;
+        as_execve_probe_symbol = execve_candidates[j].symbol;
+        break;
+      }
+    }
+
+    if (as_execve_probe_registered)
+      pr_info("all_seer: execve hook registered on %s\n", as_execve_probe_symbol);
+    else
+      pr_warn("all_seer: execve hook unavailable; continuing without execve capture\n");
+  }
+#endif
+
   // mark module as ready
   as_clear_owner_lease();
 
   atomic_set(&as_ready, 1);
 
-  pr_info("all_seer: loaded (%d hook(s) active)\n", as_num_probes);
+    pr_info("all_seer: loaded (%d hook(s) active)\n",
+      as_num_probes + (as_execve_probe_registered ? 1 : 0));
 
   return 0;
 }
@@ -392,6 +442,11 @@ static void __exit allseer_exit(void) {
   // unregistering kprobe hooks
   for (i = 0; i < as_num_probes; i++)
     unregister_kprobe(&as_kprobes[i]);
+
+#if AS_HOOK_EXECVE
+  if (as_execve_probe_registered)
+    unregister_kprobe(&as_execve_probe);
+#endif
 
   // unregistering procfs entries
   proc_remove(as_all_seer_entry);
