@@ -51,6 +51,18 @@ const hasDeadProcessesFeed = Boolean(ui.deadProcessesBody);
 let lifecycleRefreshTimer = null;
 let deadProcessesRefreshTimer = null;
 
+const PROCESS_PANEL_CURSOR_OFFSET_PX = 18;
+const PROCESS_PANEL_VIEWPORT_PADDING_PX = 12;
+
+const processHoverState = {
+  panelEl: null,
+  activeRowKey: null,
+  activeTableKind: null,
+  mouseX: 0,
+  mouseY: 0,
+  rafId: null,
+};
+
 let epsData = null;
 let epsChart = null;
 
@@ -308,12 +320,180 @@ function prependForkExecRow(ev) {
   }
 }
 
+function processRowKey(row) {
+  return [
+    String(row.pid ?? ""),
+    String(row.start_ts_s ?? ""),
+    String(row.start_ts_ms ?? ""),
+    String(row.last_ts_s ?? ""),
+    String(row.last_ts_ms ?? ""),
+    String(row.comm ?? ""),
+  ].join("|");
+}
+
+function boolToYesNo(value) {
+  return value ? "yes" : "no";
+}
+
+function processDetailsMarkup(row) {
+  const details = [
+    ["Start", fmtEventTs(row.start_ts_s, row.start_ts_ms)],
+    ["Last", fmtEventTs(row.last_ts_s, row.last_ts_ms)],
+    ["PID", row.pid ?? ""],
+    ["PPID", row.ppid ?? ""],
+    ["UID", row.uid ?? ""],
+    ["Comm", row.comm ?? ""],
+    ["Exec", row.exec_arg ?? ""],
+    ["Running", boolToYesNo(row.running)],
+    ["Opens", row.open_count ?? 0],
+    ["Connects", row.connect_count ?? 0],
+    ["First Open", row.first_open ?? ""],
+    ["First Connect", row.first_connect ?? ""],
+  ];
+
+  const lines = details.map(([label, value]) => `
+    <div class="process-hover-details__label">${esc(label)}</div>
+    <div class="process-hover-details__value">${esc(value)}</div>
+  `).join("");
+
+  return `
+    <div class="process-hover-details__title">Process Details</div>
+    <div class="process-hover-details__grid">${lines}</div>
+  `;
+}
+
+function ensureProcessHoverPanel() {
+  if (processHoverState.panelEl) return processHoverState.panelEl;
+
+  const panel = document.createElement("aside");
+  panel.className = "process-hover-details";
+  panel.setAttribute("aria-hidden", "true");
+  document.body.appendChild(panel);
+
+  processHoverState.panelEl = panel;
+  return panel;
+}
+
+function scheduleProcessPanelPositionUpdate() {
+  if (processHoverState.rafId != null) return;
+
+  processHoverState.rafId = window.requestAnimationFrame(() => {
+    processHoverState.rafId = null;
+    updateProcessPanelPosition();
+  });
+}
+
+function updateProcessPanelPosition() {
+  const panel = processHoverState.panelEl;
+  if (!panel || !panel.classList.contains("is-visible")) return;
+
+  const panelWidth = panel.offsetWidth;
+  const panelHeight = panel.offsetHeight;
+  const maxX = Math.max(
+    PROCESS_PANEL_VIEWPORT_PADDING_PX,
+    window.innerWidth - panelWidth - PROCESS_PANEL_VIEWPORT_PADDING_PX
+  );
+  const maxY = Math.max(
+    PROCESS_PANEL_VIEWPORT_PADDING_PX,
+    window.innerHeight - panelHeight - PROCESS_PANEL_VIEWPORT_PADDING_PX
+  );
+
+  let x = processHoverState.mouseX + PROCESS_PANEL_CURSOR_OFFSET_PX;
+  let y = processHoverState.mouseY + PROCESS_PANEL_CURSOR_OFFSET_PX;
+
+  if (x > maxX) {
+    x = processHoverState.mouseX - panelWidth - PROCESS_PANEL_CURSOR_OFFSET_PX;
+  }
+  if (y > maxY) {
+    y = processHoverState.mouseY - panelHeight - PROCESS_PANEL_CURSOR_OFFSET_PX;
+  }
+
+  x = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(x, maxX));
+  y = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(y, maxY));
+
+  panel.style.left = `${Math.round(x)}px`;
+  panel.style.top = `${Math.round(y)}px`;
+}
+
+function hideProcessPanel() {
+  const panel = processHoverState.panelEl;
+  if (!panel) return;
+
+  panel.classList.remove("is-visible");
+  panel.setAttribute("aria-hidden", "true");
+  processHoverState.activeRowKey = null;
+  processHoverState.activeTableKind = null;
+}
+
+function showProcessPanel(row, tableKind) {
+  const panel = ensureProcessHoverPanel();
+
+  panel.innerHTML = processDetailsMarkup(row);
+  panel.classList.add("is-visible");
+  panel.setAttribute("aria-hidden", "false");
+
+  processHoverState.activeRowKey = processRowKey(row);
+  processHoverState.activeTableKind = tableKind;
+
+  scheduleProcessPanelPositionUpdate();
+}
+
+function bindProcessHoverRow(tr, row, tableKind) {
+  tr.classList.add("process-hover-row");
+  tr.dataset.processHover = "1";
+  tr.dataset.processHoverKey = processRowKey(row);
+  tr.__processHoverRow = row;
+  tr.__processHoverTableKind = tableKind;
+
+  tr.addEventListener("mouseenter", (event) => {
+    processHoverState.mouseX = event.clientX;
+    processHoverState.mouseY = event.clientY;
+    showProcessPanel(row, tableKind);
+  });
+
+  tr.addEventListener("mousemove", (event) => {
+    processHoverState.mouseX = event.clientX;
+    processHoverState.mouseY = event.clientY;
+    if (!processHoverState.activeRowKey) {
+      showProcessPanel(row, tableKind);
+      return;
+    }
+    scheduleProcessPanelPositionUpdate();
+  });
+
+  tr.addEventListener("mouseleave", () => {
+    hideProcessPanel();
+  });
+}
+
+function syncProcessPanelAfterRowsRender() {
+  if (!processHoverState.activeRowKey) return;
+
+  const el = document.elementFromPoint(processHoverState.mouseX, processHoverState.mouseY);
+  const rowEl = el?.closest?.("tr[data-process-hover='1']");
+  if (!rowEl || !rowEl.__processHoverRow || !rowEl.__processHoverTableKind) {
+    hideProcessPanel();
+    return;
+  }
+
+  const nextKey = rowEl.dataset.processHoverKey || "";
+  if (
+    nextKey !== processHoverState.activeRowKey
+    || rowEl.__processHoverTableKind !== processHoverState.activeTableKind
+  ) {
+    showProcessPanel(rowEl.__processHoverRow, rowEl.__processHoverTableKind);
+  } else {
+    scheduleProcessPanelPositionUpdate();
+  }
+}
+
 function renderLifecycleRows(rows) {
   if (!ui.lifecycleBody) return;
 
   const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    bindProcessHoverRow(tr, row, "lifecycle");
     tr.innerHTML = `
       <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
       <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
@@ -332,6 +512,7 @@ function renderLifecycleRows(rows) {
   });
 
   ui.lifecycleBody.replaceChildren(fragment);
+  syncProcessPanelAfterRowsRender();
 }
 
 function renderDeadProcessesRows(rows) {
@@ -340,6 +521,7 @@ function renderDeadProcessesRows(rows) {
   const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    bindProcessHoverRow(tr, row, "dead-processes");
     tr.innerHTML = `
       <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
       <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
@@ -358,6 +540,7 @@ function renderDeadProcessesRows(rows) {
   });
 
   ui.deadProcessesBody.replaceChildren(fragment);
+  syncProcessPanelAfterRowsRender();
 }
 
 async function loadLifecycleSnapshot() {
@@ -687,6 +870,10 @@ function initResizableTables() {
 // --- Boot --------------------------------------------------------------------
 
 initResizableTables();
+
+window.addEventListener("resize", () => {
+  scheduleProcessPanelPositionUpdate();
+});
 
 if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed) {
   loadSnapshot()
