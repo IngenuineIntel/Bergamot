@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Exec / Fork</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <section class="card full-width">
+      <h2>Exec / Fork</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time (unix.sss)</th>
+              <th>PID</th>
+              <th>PPID</th>
+              <th>UID</th>
+              <th>Type</th>
+              <th>Comm</th>
+              <th>Arg</th>
+            </tr>
+          </thead>
+          <tbody id="exec-fork-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/iframe_resize_child.js"></script>
+</body>
+</html>

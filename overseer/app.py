@@ -125,6 +125,11 @@ def graph_syscalls():
     return render_template("graph/syscalls.html")
 
 
+@app.route("/graph/exec-fork")
+def graph_exec_fork():
+    return render_template("graph/exec_fork.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """
@@ -198,6 +203,12 @@ def api_file_opens():
 def api_network():
     """Return the last 100 outbound TCP connection events."""
     return jsonify(store.get_network(100))
+
+
+@app.route("/api/exec_fork")
+def api_exec_fork():
+    """Return the last 200 exec and fork events."""
+    return jsonify(store.get_exec_fork(200))
 
 
 @app.route("/api/stats")
