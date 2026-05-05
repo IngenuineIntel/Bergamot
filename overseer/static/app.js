@@ -33,6 +33,7 @@ const ui = {
   syscallsBody: document.getElementById("syscalls-body"),
   forkBody: document.getElementById("fork-body"),
   forkExecBody: document.getElementById("fork-exec-body"),
+  lifecycleBody: document.getElementById("lifecycle-body"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -43,6 +44,9 @@ const hasNetworkFeed = Boolean(ui.netBody);
 const hasSyscallsFeed = Boolean(ui.syscallsBody);
 const hasForkFeed = Boolean(ui.forkBody);
 const hasForkExecFeed = Boolean(ui.forkExecBody);
+const hasLifecycleFeed = Boolean(ui.lifecycleBody);
+
+let lifecycleRefreshTimer = null;
 
 let epsData = null;
 let epsChart = null;
@@ -301,6 +305,50 @@ function prependForkExecRow(ev) {
   }
 }
 
+function renderLifecycleRows(rows) {
+  if (!ui.lifecycleBody) return;
+
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${esc(row.pid ?? "")}</td>
+      <td>${esc(row.ppid ?? "")}</td>
+      <td>${esc(row.uid ?? "")}</td>
+      <td>${esc(row.comm ?? "")}</td>
+      <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
+      <td>${row.running ? "yes" : "no"}</td>
+      <td>${esc(row.open_count ?? 0)}</td>
+      <td>${esc(row.connect_count ?? 0)}</td>
+      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>
+    `;
+    fragment.appendChild(tr);
+  });
+
+  ui.lifecycleBody.replaceChildren(fragment);
+}
+
+async function loadLifecycleSnapshot() {
+  if (!hasLifecycleFeed) return;
+
+  const rows = await fetch("/api/lifecycle")
+    .then((r) => r.json());
+  renderLifecycleRows(Array.isArray(rows) ? rows : []);
+}
+
+function scheduleLifecycleRefresh() {
+  if (!hasLifecycleFeed) return;
+  if (lifecycleRefreshTimer) return;
+
+  lifecycleRefreshTimer = setTimeout(() => {
+    lifecycleRefreshTimer = null;
+    loadLifecycleSnapshot().catch(() => {});
+  }, 600);
+}
+
 function ingestEvent(ev) {
   if (hasProcTable && ev?.kind === "proc_snapshot") {
     applyProcessSnapshot(ev);
@@ -312,6 +360,9 @@ function ingestEvent(ev) {
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
   if (hasForkFeed && ev.type === "fork") prependForkRow(ev);
   if (hasForkExecFeed && (ev.type === "fork" || ev.type === "execve")) prependForkExecRow(ev);
+  if (hasLifecycleFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+    scheduleLifecycleRefresh();
+  }
   if (hasSyscallsFeed) prependEventRow(ev);
 }
 
@@ -383,6 +434,10 @@ async function loadSnapshot() {
     );
   }
 
+  if (hasLifecycleFeed) {
+    tasks.push(loadLifecycleSnapshot());
+  }
+
   if (hasEps || hasStats) {
     tasks.push(
       fetch("/api/stats")
@@ -399,13 +454,13 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed)) {
     return;
   }
 
   const es = new EventSource("/api/stream");
 
-  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed) {
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed) {
     es.addEventListener("event", (e) => {
       try {
         ingestEvent(JSON.parse(e.data));
@@ -579,7 +634,7 @@ function initResizableTables() {
 
 initResizableTables();
 
-if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed) {
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed) {
   loadSnapshot()
     .then(connectSSE)
     .catch((err) => {

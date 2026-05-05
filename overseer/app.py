@@ -228,6 +228,12 @@ def api_fork_exec():
     return jsonify(store.get_fork_exec(300))
 
 
+@app.route("/api/lifecycle")
+def api_lifecycle():
+    """Return live process lifecycle rows."""
+    return jsonify(store.get_lifecycle(300))
+
+
 @app.route("/api/stats")
 def api_stats():
     """Return events/sec, connected agent count, and uptime."""

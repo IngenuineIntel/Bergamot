@@ -8,36 +8,61 @@
 </head>
 <body>
   <header>
-    <h1>Bergamot</h1>
-    <div id="stats-bar"><span>Copyright 2026 IngenuineIntel &lt;roan.rothrock@hotmail.com&gt;</span></div>
+    <h1>Bergamot Live</h1>
+    <div id="stats-bar">
+      <span>Live monitoring active</span>
+      <a class="header-link" href="/history">Historical records</a>
+    </div>
   </header>
 
-  <main>
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-eps" data-graph-frame title="Events per second graph" src="/graph/events-per-sec" loading="lazy"></iframe>
+  <main class="live-main">
+    <section class="card live-pane live-pane-left">
+      <h2>Process Lifecycle</h2>
+      <div class="table-wrap live-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Start (unix.sss)</th>
+              <th>Last (unix.sss)</th>
+              <th>PID</th>
+              <th>PPID</th>
+              <th>UID</th>
+              <th>Comm</th>
+              <th>Exec</th>
+              <th>Running</th>
+              <th>Opens</th>
+              <th>Connects</th>
+              <th>First Open</th>
+              <th>First Connect</th>
+            </tr>
+          </thead>
+          <tbody id="lifecycle-body"></tbody>
+        </table>
+      </div>
     </section>
 
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-processes" data-graph-frame title="Processes table" src="/graph/processes" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell half">
-      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="File opens table" src="/graph/file-opens" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell half">
-      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="Network connections table" src="/graph/network" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="Fork + Execve table" src="/graph/fork-exec" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-syscalls" data-graph-frame title="All syscalls table" src="/graph/syscalls" loading="lazy"></iframe>
+    <section class="card live-pane live-pane-right">
+      <h2>All Syscalls</h2>
+      <div class="table-wrap live-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time (unix.sss)</th>
+              <th>PID</th>
+              <th>PPID</th>
+              <th>UID</th>
+              <th>Type</th>
+              <th>Comm</th>
+              <th>Arg1</th>
+              <th>Arg2</th>
+            </tr>
+          </thead>
+          <tbody id="syscalls-body"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
-  <script src="/static/iframe_resize_parent.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

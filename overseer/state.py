@@ -430,6 +430,100 @@ class EventStore:
             items = list(self.fork_exec_events)
         return items[-limit:]
 
+    def get_lifecycle(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            events = list(self.recent_events)
+            processes = dict(self.processes)
+
+        sessions: dict[int, dict] = {}
+        for ev in events:
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("kind") == "proc_snapshot":
+                continue
+
+            try:
+                pid = int(ev.get("pid", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
+            if pid <= 0:
+                continue
+
+            ts_s = int(ev.get("ts_s", 0) or 0)
+            ts_ms = int(ev.get("ts_ms", 0) or 0)
+            ev_type = str(ev.get("type", "") or "")
+
+            row = sessions.get(pid)
+            if row is None:
+                row = {
+                    "pid": pid,
+                    "ppid": int(ev.get("ppid", 0) or 0),
+                    "uid": int(ev.get("uid", 0) or 0),
+                    "comm": str(ev.get("comm", "") or ""),
+                    "exec_arg": "",
+                    "fork_seen": False,
+                    "exec_seen": False,
+                    "open_count": 0,
+                    "connect_count": 0,
+                    "first_open": "",
+                    "first_connect": "",
+                    "start_ts_s": ts_s,
+                    "start_ts_ms": ts_ms,
+                    "last_ts_s": ts_s,
+                    "last_ts_ms": ts_ms,
+                    "running": False,
+                }
+                sessions[pid] = row
+
+            row["ppid"] = int(ev.get("ppid", row["ppid"]) or 0)
+            row["uid"] = int(ev.get("uid", row["uid"]) or 0)
+            row["comm"] = str(ev.get("comm", row["comm"]) or row["comm"])
+
+            if (ts_s, ts_ms) < (row["start_ts_s"], row["start_ts_ms"]):
+                row["start_ts_s"] = ts_s
+                row["start_ts_ms"] = ts_ms
+
+            if (ts_s, ts_ms) >= (row["last_ts_s"], row["last_ts_ms"]):
+                row["last_ts_s"] = ts_s
+                row["last_ts_ms"] = ts_ms
+
+            if ev_type == "fork":
+                row["fork_seen"] = True
+            elif ev_type == "execve":
+                row["exec_seen"] = True
+                row["exec_arg"] = str(ev.get("arg", "") or "")
+            elif ev_type == "open":
+                row["open_count"] += 1
+                if not row["first_open"]:
+                    row["first_open"] = str(ev.get("arg", "") or "")
+            elif ev_type == "connect":
+                row["connect_count"] += 1
+                if not row["first_connect"]:
+                    row["first_connect"] = str(ev.get("arg", "") or "")
+
+        for pid, proc in processes.items():
+            row = sessions.get(pid)
+            if row is None:
+                continue
+            row["running"] = True
+            row["ppid"] = int(proc.get("ppid", row["ppid"]) or row["ppid"])
+            row["uid"] = int(proc.get("uid", row["uid"]) or row["uid"])
+            row["comm"] = str(proc.get("comm", row["comm"]) or row["comm"])
+
+            last_seen_s = int(proc.get("last_seen_s", row["last_ts_s"]) or row["last_ts_s"])
+            last_seen_ms = int(proc.get("last_seen_ms", row["last_ts_ms"]) or row["last_ts_ms"])
+            if (last_seen_s, last_seen_ms) > (row["last_ts_s"], row["last_ts_ms"]):
+                row["last_ts_s"] = last_seen_s
+                row["last_ts_ms"] = last_seen_ms
+
+        ordered = sorted(
+            sessions.values(),
+            key=lambda r: (r["last_ts_s"], r["last_ts_ms"], r["pid"]),
+            reverse=True,
+        )
+        return ordered[:limit]
+
     def get_recent_events(self, limit: int = 200) -> list[dict]:
         with self._lock:
             items = list(self.recent_events)
