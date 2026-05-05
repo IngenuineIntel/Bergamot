@@ -1,2 +1,0 @@
--- fetchdead.sql
--- getting dead processes
