@@ -71,12 +71,75 @@ const PROCESS_PANEL_VIEWPORT_PADDING_PX = 12;
 
 const processHoverState = {
   panelEl: null,
+  hostWin: window,
+  hostDoc: document,
+  frameEl: null,
+  hostResizeBound: false,
   activeRowKey: null,
   activeTableKind: null,
   mouseX: 0,
   mouseY: 0,
+  localMouseX: 0,
+  localMouseY: 0,
   rafId: null,
 };
+
+function findHostFrameElement() {
+  if (window.parent === window) return null;
+
+  let parentDoc;
+  try {
+    parentDoc = window.parent.document;
+  } catch (_) {
+    return null;
+  }
+
+  const frames = parentDoc.querySelectorAll("iframe[data-graph-frame]");
+  for (const frame of frames) {
+    try {
+      const framePath = new URL(frame.getAttribute("src"), window.parent.location.href).pathname;
+      if (framePath === window.location.pathname) return frame;
+    } catch (_) {
+      // Ignore malformed frame src values.
+    }
+  }
+
+  return null;
+}
+
+function resolveProcessPanelHost() {
+  const frameEl = findHostFrameElement();
+  if (!frameEl) {
+    processHoverState.hostWin = window;
+    processHoverState.hostDoc = document;
+    processHoverState.frameEl = null;
+    return;
+  }
+
+  processHoverState.hostWin = window.parent;
+  processHoverState.hostDoc = window.parent.document;
+  processHoverState.frameEl = frameEl;
+
+  if (!processHoverState.hostResizeBound) {
+    processHoverState.hostResizeBound = true;
+    processHoverState.hostWin.addEventListener("resize", scheduleProcessPanelPositionUpdate);
+  }
+}
+
+function updateProcessMousePosition(clientX, clientY) {
+  processHoverState.localMouseX = clientX;
+  processHoverState.localMouseY = clientY;
+
+  if (processHoverState.frameEl) {
+    const rect = processHoverState.frameEl.getBoundingClientRect();
+    processHoverState.mouseX = rect.left + clientX;
+    processHoverState.mouseY = rect.top + clientY;
+    return;
+  }
+
+  processHoverState.mouseX = clientX;
+  processHoverState.mouseY = clientY;
+}
 
 let epsData = null;
 let epsChart = null;
@@ -485,10 +548,11 @@ function processDetailsMarkup(row) {
 function ensureProcessHoverPanel() {
   if (processHoverState.panelEl) return processHoverState.panelEl;
 
-  const panel = document.createElement("aside");
+  resolveProcessPanelHost();
+  const panel = processHoverState.hostDoc.createElement("aside");
   panel.className = "process-hover-details";
   panel.setAttribute("aria-hidden", "true");
-  document.body.appendChild(panel);
+  processHoverState.hostDoc.body.appendChild(panel);
 
   processHoverState.panelEl = panel;
   return panel;
@@ -509,27 +573,47 @@ function updateProcessPanelPosition() {
 
   const panelWidth = panel.offsetWidth;
   const panelHeight = panel.offsetHeight;
+  const viewportWidth = processHoverState.hostWin.innerWidth;
+  const viewportHeight = processHoverState.hostWin.innerHeight;
   const maxX = Math.max(
     PROCESS_PANEL_VIEWPORT_PADDING_PX,
-    window.innerWidth - panelWidth - PROCESS_PANEL_VIEWPORT_PADDING_PX
+    viewportWidth - panelWidth - PROCESS_PANEL_VIEWPORT_PADDING_PX
   );
   const maxY = Math.max(
     PROCESS_PANEL_VIEWPORT_PADDING_PX,
-    window.innerHeight - panelHeight - PROCESS_PANEL_VIEWPORT_PADDING_PX
+    viewportHeight - panelHeight - PROCESS_PANEL_VIEWPORT_PADDING_PX
   );
 
-  let x = processHoverState.mouseX + PROCESS_PANEL_CURSOR_OFFSET_PX;
-  let y = processHoverState.mouseY + PROCESS_PANEL_CURSOR_OFFSET_PX;
+  const clampX = (x) => Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(x, maxX));
+  const clampY = (y) => Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(y, maxY));
+  const mx = processHoverState.mouseX;
+  const my = processHoverState.mouseY;
 
-  if (x > maxX) {
-    x = processHoverState.mouseX - panelWidth - PROCESS_PANEL_CURSOR_OFFSET_PX;
-  }
-  if (y > maxY) {
-    y = processHoverState.mouseY - panelHeight - PROCESS_PANEL_CURSOR_OFFSET_PX;
-  }
+  const candidates = [
+    { x: mx + PROCESS_PANEL_CURSOR_OFFSET_PX, y: my + PROCESS_PANEL_CURSOR_OFFSET_PX },
+    { x: mx - panelWidth - PROCESS_PANEL_CURSOR_OFFSET_PX, y: my + PROCESS_PANEL_CURSOR_OFFSET_PX },
+    { x: mx + PROCESS_PANEL_CURSOR_OFFSET_PX, y: my - panelHeight - PROCESS_PANEL_CURSOR_OFFSET_PX },
+    { x: mx - panelWidth - PROCESS_PANEL_CURSOR_OFFSET_PX, y: my - panelHeight - PROCESS_PANEL_CURSOR_OFFSET_PX },
+  ];
 
-  x = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(x, maxX));
-  y = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(y, maxY));
+  let x = clampX(candidates[0].x);
+  let y = clampY(candidates[0].y);
+
+  for (const candidate of candidates) {
+    const cx = clampX(candidate.x);
+    const cy = clampY(candidate.y);
+    const overlapsCursor = (
+      mx >= cx
+      && mx <= cx + panelWidth
+      && my >= cy
+      && my <= cy + panelHeight
+    );
+    if (!overlapsCursor) {
+      x = cx;
+      y = cy;
+      break;
+    }
+  }
 
   panel.style.left = `${Math.round(x)}px`;
   panel.style.top = `${Math.round(y)}px`;
@@ -566,14 +650,12 @@ function bindProcessHoverRow(tr, row, tableKind) {
   tr.__processHoverTableKind = tableKind;
 
   tr.addEventListener("mouseenter", (event) => {
-    processHoverState.mouseX = event.clientX;
-    processHoverState.mouseY = event.clientY;
+    updateProcessMousePosition(event.clientX, event.clientY);
     showProcessPanel(row, tableKind);
   });
 
   tr.addEventListener("mousemove", (event) => {
-    processHoverState.mouseX = event.clientX;
-    processHoverState.mouseY = event.clientY;
+    updateProcessMousePosition(event.clientX, event.clientY);
     if (!processHoverState.activeRowKey) {
       showProcessPanel(row, tableKind);
       return;
@@ -589,7 +671,7 @@ function bindProcessHoverRow(tr, row, tableKind) {
 function syncProcessPanelAfterRowsRender() {
   if (!processHoverState.activeRowKey) return;
 
-  const el = document.elementFromPoint(processHoverState.mouseX, processHoverState.mouseY);
+  const el = document.elementFromPoint(processHoverState.localMouseX, processHoverState.localMouseY);
   const rowEl = el?.closest?.("tr[data-process-hover='1']");
   if (!rowEl || !rowEl.__processHoverRow || !rowEl.__processHoverTableKind) {
     hideProcessPanel();
