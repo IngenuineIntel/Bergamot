@@ -89,6 +89,10 @@ main {
   overflow: hidden;
 }
 
+.overview {
+  padding: 16px 24px 0;
+}
+
 .overview.has-content {
   padding: 16px 24px 0;
 }
