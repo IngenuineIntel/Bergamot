@@ -8,8 +8,8 @@
 /* ── HOOK SWITCHES ──────────────────────────────────────────────────────── */
 #define AS_HOOK_OPEN 1
 #define AS_HOOK_FORK 1
-#define AS_HOOK_EXEC 1
 #define AS_HOOK_CONNECT 1
+#define AS_HOOK_EXECVE 1
 
 /*
  * In the event of testing all of the software on the same machine, one can

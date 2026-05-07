@@ -23,14 +23,18 @@ SSE stream (/api/stream):
   events.  Each SSE message is one JSON object on the "event" channel,
   plus periodic "stats" heartbeats every second.
 """
+BERGAMOT_VERSION = "0.1"
 
+import atexit
 import json
 import os
 import queue
+import secrets
 import threading
 import time
+import uuid
 
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
 
 from server import start_tcp_server
 from state import store
@@ -121,6 +125,26 @@ def graph_syscalls():
     return render_template("graph/syscalls.html")
 
 
+@app.route("/graph/fork")
+def graph_fork():
+    return render_template("graph/fork.html")
+
+
+@app.route("/graph/fork-exec")
+def graph_fork_exec():
+    return render_template("graph/fork_exec.html")
+
+
+@app.route("/graph/lifecycle")
+def graph_lifecycle():
+    return render_template("graph/lifecycle.html")
+
+
+@app.route("/graph/dead-processes")
+def graph_dead_processes():
+    return render_template("graph/dead_processes.html")
+
+
 @app.route("/api/stream")
 def api_stream():
     """
@@ -196,6 +220,47 @@ def api_network():
     return jsonify(store.get_network(100))
 
 
+@app.route("/api/fork")
+def api_fork():
+    """Return the last 200 fork events."""
+    return jsonify(store.get_fork(200))
+
+
+@app.route("/api/execve")
+def api_execve():
+    """Return the last 200 execve events."""
+    return jsonify(store.get_execve(200))
+
+
+@app.route("/api/fork-exec")
+def api_fork_exec():
+    """Return the last 300 mixed fork+execve events."""
+    return jsonify(store.get_fork_exec(300))
+
+
+@app.route("/api/lifecycle")
+def api_lifecycle():
+    """Return live process lifecycle rows."""
+    return jsonify(store.get_lifecycle(300))
+
+
+@app.route("/api/dead-processes")
+def api_dead_processes():
+    """Return non-running lifecycle rows; supports limit/offset paging."""
+    raw_limit = request.args.get("limit", default=None, type=int)
+    raw_offset = request.args.get("offset", default=0, type=int)
+
+    # Default remains full archive to preserve existing UI behavior.
+    limit = raw_limit
+    if limit is not None:
+        limit = max(1, min(limit, 5000))
+
+    offset = max(0, raw_offset)
+
+    rows = store.get_dead_processes(limit=limit, offset=offset)
+    return jsonify(rows)
+
+
 @app.route("/api/stats")
 def api_stats():
     """Return events/sec, connected agent count, and uptime."""
@@ -204,16 +269,46 @@ def api_stats():
 # ── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     def envvar_fetch(name: str, valtype: type, default):
-        try: default = valtype(default)
-        except TypeError: raise AssertionError(
+        try:
+            default = valtype(default)
+        except TypeError:
+            raise AssertionError(
             f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
         )
-        try: return valtype(os.environ[str])
-        except: return default
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        try:
+            return valtype(raw)
+        except Exception:
+            return default
 
     tcp_port = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
     http_host = "0.0.0.0"
     http_port = envvar_fetch("BERGAMOT_HTTP_PORT", int, 27960)
+
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    db_base_dir = os.environ.get("BERGAMOT_SQL_PATH", os.path.join(app_dir, "db"))
+    sql_dir = os.path.join(app_dir, "sql")
+
+    os.makedirs(db_base_dir, exist_ok=True)
+
+    session_uuid = uuid.uuid4().hex
+    session_salt = secrets.token_hex(4)
+    session_start_unix = int(time.time())
+    session_name = f"{session_uuid}-{session_salt}-{session_start_unix}.db"
+    session_db_path = os.path.join(db_base_dir, session_name)
+
+    store.prepare_sqlite_session(
+        db_path=session_db_path,
+        sql_dir=sql_dir,
+        db_name=session_name,
+        db_time=str(session_start_unix),
+        overseer_ver=BERGAMOT_VERSION,
+    )
+    atexit.register(store.close)
+    print(f"[over-seer] session db pending at {session_db_path}; waiting for agent handshake",
+          flush=True)
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)

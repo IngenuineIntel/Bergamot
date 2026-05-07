@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dead Processes</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="iframe-page">
+  <main>
+    <section class="card full-width">
+      <h2>Dead Processes</h2>
+      <div class="table-toolbar" aria-label="Dead processes paging controls">
+        <button id="dead-processes-prev" class="pager-btn" type="button">Prev</button>
+        <button id="dead-processes-next" class="pager-btn" type="button">Next</button>
+        <label class="pager-size-label" for="dead-processes-page-size">Rows</label>
+        <select id="dead-processes-page-size" class="pager-select" aria-label="Dead processes rows per page">
+          <option value="100">100</option>
+          <option value="300" selected>300</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+        <span id="dead-processes-page-info" class="pager-status">Page 1</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Start (unix.sss)</th>
+              <th>Last (unix.sss)</th>
+              <th>PID</th>
+              <th>PPID</th>
+              <th>UID</th>
+              <th>Comm</th>
+              <th>Exec</th>
+            </tr>
+          </thead>
+          <tbody id="dead-processes-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/iframe_resize_child.js"></script>
+</body>
+</html>

@@ -9,31 +9,36 @@
 <body>
   <header>
     <h1>Bergamot</h1>
-    <div id="stats-bar"><span>Copyright 2026 IngenuineIntel &lt;roan.rothrock@hotmail.com&gt;</span></div>
+    <div id="stats-bar">
+      <span>Live</span>
+      <a class="header-link" href="/history">Historical records</a>
+    </div>
   </header>
 
-  <main>
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-eps" data-graph-frame title="Events per second graph" src="/graph/events-per-sec" loading="lazy"></iframe>
-    </section>
+  <main class="live-main">
+    <details class="iframe-dropdown iframe-dropdown-group" open>
+      <summary>Process Views</summary>
+      <div class="iframe-dropdown-grid">
+        <iframe
+          class="graph-frame graph-frame-feed"
+          data-graph-frame
+          src="/graph/lifecycle"
+          title="Process Lifecycle"
+          loading="lazy"
+        ></iframe>
 
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-processes" data-graph-frame title="Processes table" src="/graph/processes" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell half">
-      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="File opens table" src="/graph/file-opens" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell half">
-      <iframe class="graph-frame graph-frame-feed" data-graph-frame title="Network connections table" src="/graph/network" loading="lazy"></iframe>
-    </section>
-
-    <section class="card embed-shell full-width">
-      <iframe class="graph-frame graph-frame-syscalls" data-graph-frame title="All syscalls table" src="/graph/syscalls" loading="lazy"></iframe>
-    </section>
+        <iframe
+          class="graph-frame graph-frame-feed"
+          data-graph-frame
+          src="/graph/dead-processes"
+          title="Dead Processes"
+          loading="lazy"
+        ></iframe>
+      </div>
+    </details>
   </main>
 
   <script src="/static/iframe_resize_parent.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

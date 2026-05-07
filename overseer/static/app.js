@@ -7,7 +7,7 @@
  *      /api/stream with event types: event, stats, ping
  *
  * Payload schemas:
- *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, comm, arg}
+ *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg}
  *   Process snapshots: {kind: "proc_snapshot", ts_s, ts_ms, processes: [...]}
  */
 
@@ -31,6 +31,14 @@ const ui = {
   openBody: document.getElementById("open-body"),
   netBody: document.getElementById("net-body"),
   syscallsBody: document.getElementById("syscalls-body"),
+  forkBody: document.getElementById("fork-body"),
+  forkExecBody: document.getElementById("fork-exec-body"),
+  lifecycleBody: document.getElementById("lifecycle-body"),
+  deadProcessesBody: document.getElementById("dead-processes-body"),
+  deadProcessesPrev: document.getElementById("dead-processes-prev"),
+  deadProcessesNext: document.getElementById("dead-processes-next"),
+  deadProcessesPageSize: document.getElementById("dead-processes-page-size"),
+  deadProcessesPageInfo: document.getElementById("dead-processes-page-info"),
 };
 
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
@@ -39,6 +47,31 @@ const hasProcTable = Boolean(ui.procBody);
 const hasOpenFeed = Boolean(ui.openBody);
 const hasNetworkFeed = Boolean(ui.netBody);
 const hasSyscallsFeed = Boolean(ui.syscallsBody);
+const hasForkFeed = Boolean(ui.forkBody);
+const hasForkExecFeed = Boolean(ui.forkExecBody);
+const hasLifecycleFeed = Boolean(ui.lifecycleBody);
+const hasDeadProcessesFeed = Boolean(ui.deadProcessesBody);
+
+let lifecycleRefreshTimer = null;
+let deadProcessesRefreshTimer = null;
+
+const deadPaging = {
+  page: 0,
+  pageSize: 300,
+  hasMore: false,
+};
+
+const PROCESS_PANEL_CURSOR_OFFSET_PX = 18;
+const PROCESS_PANEL_VIEWPORT_PADDING_PX = 12;
+
+const processHoverState = {
+  panelEl: null,
+  activeRowKey: null,
+  activeTableKind: null,
+  mouseX: 0,
+  mouseY: 0,
+  rafId: null,
+};
 
 let epsData = null;
 let epsChart = null;
@@ -99,9 +132,14 @@ function fmtUptime(seconds) {
 }
 
 function fmtEventTs(ts_s, ts_ms) {
-  const sec = Number(ts_s ?? 0);
-  const ms = Number(ts_ms ?? 0);
-  return `${sec}.${String(ms).padStart(3, "0")}`;
+  const date = new Date(ts_s * 1000 + ts_ms);
+  return date.toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  }) + " " + date.toLocaleDateString('en-US');
 }
 
 function applyStats(stats) {
@@ -258,6 +296,384 @@ function prependEventRow(ev) {
   }
 }
 
+function prependForkRow(ev) {
+  if (!ui.forkBody || !ev || typeof ev !== "object") return;
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${esc(ev.pid ?? "")}</td>
+    <td>${esc(ev.ppid ?? "")}</td>
+    <td>${esc(ev.uid ?? "")}</td>
+    <td>${esc(ev.comm ?? "")}</td>
+    <td class="arg-cell">${esc(ev.arg ?? "")}</td>
+  `;
+  ui.forkBody.insertBefore(tr, ui.forkBody.firstChild);
+
+  while (ui.forkBody.rows.length > MAX_FEED_ROWS) {
+    ui.forkBody.deleteRow(ui.forkBody.rows.length - 1);
+  }
+}
+
+function prependForkExecRow(ev) {
+  if (!ui.forkExecBody || !ev || typeof ev !== "object") return;
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${esc(ev.type ?? "")}</td>
+    <td>${esc(ev.pid ?? "")}</td>
+    <td>${esc(ev.ppid ?? "")}</td>
+    <td>${esc(ev.uid ?? "")}</td>
+    <td>${esc(ev.comm ?? "")}</td>
+    <td class="arg-cell">${esc(ev.arg ?? "")}</td>
+  `;
+  ui.forkExecBody.insertBefore(tr, ui.forkExecBody.firstChild);
+
+  while (ui.forkExecBody.rows.length > MAX_FEED_ROWS) {
+    ui.forkExecBody.deleteRow(ui.forkExecBody.rows.length - 1);
+  }
+}
+
+function processRowKey(row) {
+  return [
+    String(row.pid ?? ""),
+    String(row.start_ts_s ?? ""),
+    String(row.start_ts_ms ?? ""),
+    String(row.last_ts_s ?? ""),
+    String(row.last_ts_ms ?? ""),
+    String(row.comm ?? ""),
+  ].join("|");
+}
+
+function boolToYesNo(value) {
+  return value ? "yes" : "no";
+}
+
+function processDetailsMarkup(row) {
+  const details = [
+    ["Start", fmtEventTs(row.start_ts_s, row.start_ts_ms)],
+    ["Last", fmtEventTs(row.last_ts_s, row.last_ts_ms)],
+    ["PID", row.pid ?? ""],
+    ["PPID", row.ppid ?? ""],
+    ["UID", row.uid ?? ""],
+    ["Comm", row.comm ?? ""],
+    ["Exec", row.exec_arg ?? ""],
+    ["Running", boolToYesNo(row.running)],
+    ["Opens", row.open_count ?? 0],
+    ["Connections", row.connect_count ?? 0],
+    ["First Open", row.first_open ?? ""],
+    ["First Connect", row.first_connect ?? ""],
+  ];
+
+  const lines = details.map(([label, value]) => `
+    <div class="process-hover-details__label">${esc(label)}</div>
+    <div class="process-hover-details__value">${esc(value)}</div>
+  `).join("");
+
+  return `
+    <div class="process-hover-details__title">Process Details</div>
+    <div class="process-hover-details__grid">${lines}</div>
+  `;
+}
+
+function ensureProcessHoverPanel() {
+  if (processHoverState.panelEl) return processHoverState.panelEl;
+
+  const panel = document.createElement("aside");
+  panel.className = "process-hover-details";
+  panel.setAttribute("aria-hidden", "true");
+  document.body.appendChild(panel);
+
+  processHoverState.panelEl = panel;
+  return panel;
+}
+
+function scheduleProcessPanelPositionUpdate() {
+  if (processHoverState.rafId != null) return;
+
+  processHoverState.rafId = window.requestAnimationFrame(() => {
+    processHoverState.rafId = null;
+    updateProcessPanelPosition();
+  });
+}
+
+function updateProcessPanelPosition() {
+  const panel = processHoverState.panelEl;
+  if (!panel || !panel.classList.contains("is-visible")) return;
+
+  const panelWidth = panel.offsetWidth;
+  const panelHeight = panel.offsetHeight;
+  const maxX = Math.max(
+    PROCESS_PANEL_VIEWPORT_PADDING_PX,
+    window.innerWidth - panelWidth - PROCESS_PANEL_VIEWPORT_PADDING_PX
+  );
+  const maxY = Math.max(
+    PROCESS_PANEL_VIEWPORT_PADDING_PX,
+    window.innerHeight - panelHeight - PROCESS_PANEL_VIEWPORT_PADDING_PX
+  );
+
+  let x = processHoverState.mouseX + PROCESS_PANEL_CURSOR_OFFSET_PX;
+  let y = processHoverState.mouseY + PROCESS_PANEL_CURSOR_OFFSET_PX;
+
+  if (x > maxX) {
+    x = processHoverState.mouseX - panelWidth - PROCESS_PANEL_CURSOR_OFFSET_PX;
+  }
+  if (y > maxY) {
+    y = processHoverState.mouseY - panelHeight - PROCESS_PANEL_CURSOR_OFFSET_PX;
+  }
+
+  x = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(x, maxX));
+  y = Math.max(PROCESS_PANEL_VIEWPORT_PADDING_PX, Math.min(y, maxY));
+
+  panel.style.left = `${Math.round(x)}px`;
+  panel.style.top = `${Math.round(y)}px`;
+}
+
+function hideProcessPanel() {
+  const panel = processHoverState.panelEl;
+  if (!panel) return;
+
+  panel.classList.remove("is-visible");
+  panel.setAttribute("aria-hidden", "true");
+  processHoverState.activeRowKey = null;
+  processHoverState.activeTableKind = null;
+}
+
+function showProcessPanel(row, tableKind) {
+  const panel = ensureProcessHoverPanel();
+
+  panel.innerHTML = processDetailsMarkup(row);
+  panel.classList.add("is-visible");
+  panel.setAttribute("aria-hidden", "false");
+
+  processHoverState.activeRowKey = processRowKey(row);
+  processHoverState.activeTableKind = tableKind;
+
+  scheduleProcessPanelPositionUpdate();
+}
+
+function bindProcessHoverRow(tr, row, tableKind) {
+  tr.classList.add("process-hover-row");
+  tr.dataset.processHover = "1";
+  tr.dataset.processHoverKey = processRowKey(row);
+  tr.__processHoverRow = row;
+  tr.__processHoverTableKind = tableKind;
+
+  tr.addEventListener("mouseenter", (event) => {
+    processHoverState.mouseX = event.clientX;
+    processHoverState.mouseY = event.clientY;
+    showProcessPanel(row, tableKind);
+  });
+
+  tr.addEventListener("mousemove", (event) => {
+    processHoverState.mouseX = event.clientX;
+    processHoverState.mouseY = event.clientY;
+    if (!processHoverState.activeRowKey) {
+      showProcessPanel(row, tableKind);
+      return;
+    }
+    scheduleProcessPanelPositionUpdate();
+  });
+
+  tr.addEventListener("mouseleave", () => {
+    hideProcessPanel();
+  });
+}
+
+function syncProcessPanelAfterRowsRender() {
+  if (!processHoverState.activeRowKey) return;
+
+  const el = document.elementFromPoint(processHoverState.mouseX, processHoverState.mouseY);
+  const rowEl = el?.closest?.("tr[data-process-hover='1']");
+  if (!rowEl || !rowEl.__processHoverRow || !rowEl.__processHoverTableKind) {
+    hideProcessPanel();
+    return;
+  }
+
+  const nextKey = rowEl.dataset.processHoverKey || "";
+  if (
+    nextKey !== processHoverState.activeRowKey
+    || rowEl.__processHoverTableKind !== processHoverState.activeTableKind
+  ) {
+    showProcessPanel(rowEl.__processHoverRow, rowEl.__processHoverTableKind);
+  } else {
+    scheduleProcessPanelPositionUpdate();
+  }
+}
+
+function renderLifecycleRows(rows) {
+  if (!ui.lifecycleBody) return;
+
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    bindProcessHoverRow(tr, row, "lifecycle");
+    tr.innerHTML = `
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${esc(row.pid ?? "")}</td>
+      <td>${esc(row.ppid ?? "")}</td>
+      <td>${esc(row.uid ?? "")}</td>
+      <td>${esc(row.comm ?? "")}</td>
+      <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
+      <!--<td>${row.running ? "yes" : "no"}</td>
+      <td>${esc(row.open_count ?? 0)}</td>
+      <td>${esc(row.connect_count ?? 0)}</td>
+      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
+    `;
+    fragment.appendChild(tr);
+  });
+
+  ui.lifecycleBody.replaceChildren(fragment);
+  syncProcessPanelAfterRowsRender();
+}
+
+function renderDeadProcessesRows(rows) {
+  if (!ui.deadProcessesBody) return;
+
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    bindProcessHoverRow(tr, row, "dead-processes");
+    tr.innerHTML = `
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${esc(row.pid ?? "")}</td>
+      <td>${esc(row.ppid ?? "")}</td>
+      <td>${esc(row.uid ?? "")}</td>
+      <td>${esc(row.comm ?? "")}</td>
+      <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
+      <!--<td>${row.running ? "yes" : "no"}</td>
+      <td>${esc(row.open_count ?? 0)}</td>
+      <td>${esc(row.connect_count ?? 0)}</td>
+      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
+    `;
+    fragment.appendChild(tr);
+  });
+
+  ui.deadProcessesBody.replaceChildren(fragment);
+  syncProcessPanelAfterRowsRender();
+}
+
+function hasDeadPagingControls() {
+  return Boolean(
+    ui.deadProcessesPrev
+    && ui.deadProcessesNext
+    && ui.deadProcessesPageInfo
+    && ui.deadProcessesPageSize
+  );
+}
+
+function updateDeadPagingControls() {
+  if (!hasDeadPagingControls()) return;
+
+  const pageLabel = deadPaging.page + 1;
+  ui.deadProcessesPageInfo.textContent = `Page ${pageLabel}`;
+  ui.deadProcessesPrev.disabled = deadPaging.page <= 0;
+  ui.deadProcessesNext.disabled = !deadPaging.hasMore;
+  ui.deadProcessesPageSize.value = String(deadPaging.pageSize);
+}
+
+function deadProcessesUrl() {
+  if (!hasDeadPagingControls()) {
+    return "/api/dead-processes";
+  }
+
+  const params = new URLSearchParams();
+  params.set("limit", String(deadPaging.pageSize));
+  params.set("offset", String(deadPaging.page * deadPaging.pageSize));
+  return `/api/dead-processes?${params.toString()}`;
+}
+
+async function loadLifecycleSnapshot() {
+  if (!hasLifecycleFeed) return;
+
+  const rows = await fetch("/api/lifecycle")
+    .then((r) => r.json());
+  renderLifecycleRows(Array.isArray(rows) ? rows : []);
+}
+
+function scheduleLifecycleRefresh() {
+  if (!hasLifecycleFeed) return;
+  if (lifecycleRefreshTimer) return;
+
+  lifecycleRefreshTimer = setTimeout(() => {
+    lifecycleRefreshTimer = null;
+    loadLifecycleSnapshot().catch(() => {});
+  }, 600);
+}
+
+async function loadDeadProcessesSnapshot() {
+  if (!hasDeadProcessesFeed) return;
+
+  const rows = await fetch(deadProcessesUrl())
+    .then((r) => r.json());
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  renderDeadProcessesRows(normalizedRows);
+
+  if (hasDeadPagingControls()) {
+    deadPaging.hasMore = normalizedRows.length >= deadPaging.pageSize;
+    updateDeadPagingControls();
+  }
+}
+
+function scheduleDeadProcessesRefresh() {
+  if (!hasDeadProcessesFeed) return;
+  if (deadProcessesRefreshTimer) return;
+
+  deadProcessesRefreshTimer = setTimeout(() => {
+    deadProcessesRefreshTimer = null;
+    loadDeadProcessesSnapshot().catch(() => {});
+  }, 600);
+}
+
+function changeDeadProcessesPage(nextPage) {
+  const safePage = Math.max(0, nextPage);
+  if (safePage === deadPaging.page) return;
+
+  deadPaging.page = safePage;
+  updateDeadPagingControls();
+  loadDeadProcessesSnapshot().catch(() => {});
+}
+
+function changeDeadProcessesPageSize(nextPageSize) {
+  const parsed = Number(nextPageSize);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+  if (parsed === deadPaging.pageSize) return;
+
+  deadPaging.pageSize = parsed;
+  deadPaging.page = 0;
+  updateDeadPagingControls();
+  loadDeadProcessesSnapshot().catch(() => {});
+}
+
+function initDeadProcessesControls() {
+  if (!hasDeadPagingControls()) return;
+
+  const initialPageSize = Number(ui.deadProcessesPageSize.value);
+  if (Number.isFinite(initialPageSize) && initialPageSize > 0) {
+    deadPaging.pageSize = initialPageSize;
+  }
+
+  ui.deadProcessesPrev.addEventListener("click", () => {
+    changeDeadProcessesPage(deadPaging.page - 1);
+  });
+
+  ui.deadProcessesNext.addEventListener("click", () => {
+    if (!deadPaging.hasMore) return;
+    changeDeadProcessesPage(deadPaging.page + 1);
+  });
+
+  ui.deadProcessesPageSize.addEventListener("change", () => {
+    changeDeadProcessesPageSize(ui.deadProcessesPageSize.value);
+  });
+
+  updateDeadPagingControls();
+}
+
 function ingestEvent(ev) {
   if (hasProcTable && ev?.kind === "proc_snapshot") {
     applyProcessSnapshot(ev);
@@ -267,6 +683,14 @@ function ingestEvent(ev) {
 
   if (hasOpenFeed && ev.type === "open") prependFeedRow("open-body", ev);
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
+  if (hasForkFeed && ev.type === "fork") prependForkRow(ev);
+  if (hasForkExecFeed && (ev.type === "fork" || ev.type === "execve")) prependForkExecRow(ev);
+  if (hasLifecycleFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+    scheduleLifecycleRefresh();
+  }
+  if (hasDeadProcessesFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+    scheduleDeadProcessesRefresh();
+  }
   if (hasSyscallsFeed) prependEventRow(ev);
 }
 
@@ -318,6 +742,34 @@ async function loadSnapshot() {
     );
   }
 
+  if (hasForkFeed) {
+    tasks.push(
+      fetch("/api/fork")
+        .then((r) => r.json())
+        .then((items) => {
+          [...items].reverse().forEach((ev) => prependForkRow(ev));
+        })
+    );
+  }
+
+  if (hasForkExecFeed) {
+    tasks.push(
+      fetch("/api/fork-exec")
+        .then((r) => r.json())
+        .then((items) => {
+          [...items].reverse().forEach((ev) => prependForkExecRow(ev));
+        })
+    );
+  }
+
+  if (hasLifecycleFeed) {
+    tasks.push(loadLifecycleSnapshot());
+  }
+
+  if (hasDeadProcessesFeed) {
+    tasks.push(loadDeadProcessesSnapshot());
+  }
+
   if (hasEps || hasStats) {
     tasks.push(
       fetch("/api/stats")
@@ -334,13 +786,13 @@ async function loadSnapshot() {
 // --- SSE live updates --------------------------------------------------------
 
 function connectSSE() {
-  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed)) {
+  if (!(hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed)) {
     return;
   }
 
   const es = new EventSource("/api/stream");
 
-  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
+  if (hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed) {
     es.addEventListener("event", (e) => {
       try {
         ingestEvent(JSON.parse(e.data));
@@ -513,8 +965,13 @@ function initResizableTables() {
 // --- Boot --------------------------------------------------------------------
 
 initResizableTables();
+initDeadProcessesControls();
 
-if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed) {
+window.addEventListener("resize", () => {
+  scheduleProcessPanelPositionUpdate();
+});
+
+if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSyscallsFeed || hasForkFeed || hasForkExecFeed || hasLifecycleFeed || hasDeadProcessesFeed) {
   loadSnapshot()
     .then(connectSSE)
     .catch((err) => {

@@ -8,3 +8,6 @@ allseer/.module-common.o
 
 # __pycache__ directories
 **/__pycache__/
+
+# SQLite databases
+/overseer/db/*

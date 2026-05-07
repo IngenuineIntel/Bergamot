@@ -59,10 +59,10 @@ overseer_clean:
 
 
 # universal tests
-bergamot_start: allseer_build allseer_test allseer_reload
+universal_start: allseer_build allseer_test allseer_reload
 	$(MAKE) underseer_run & $(MAKE) overseer_test_active & $(MAKE) overseer_run & exit 0
 
-bergamot_stop:
+universal_stop:
 	@# the holy mother of one-liners
 	-@sudo bash -c "for pid in \`ps -ef | grep -E 'underseer|overseer' | grep -v 'universal_stop' | awk '{print \$$2}'\`; do kill \$$pid; done"
 	@$(MAKE) underseer_clean
@@ -71,8 +71,25 @@ bergamot_stop:
 	@$(MAKE) allseer_clean
 	@echo "Everything's cleaned up!"
 
-# workflow formulas (less output but more return codes)
+# tests for just web developing
+lower_start: allseer_build allseer_load
+	$(MAKE) underseer_run > /dev/null & exit 0
 
+lower_stop:
+	-@sudo bash -c "for pid in \`ps -ef | grep 'underseer' | grep -v 'lower_stop' | awk '{print \$$2}'\`; do kill \$$pid; done"
+	@$(MAKE) underseer_clean
+	@$(MAKE) allseer_unload
+
+web_start:
+	$(OVERSEER_PYENV)/bin/python3 $(OVERSEER_DIR)/app.py &
+
+web_stop:
+	-for pid in `ps -ef | grep overseer | grep -v 'web_stop' | awk '{print $$2}'`; do kill $$pid; done
+
+web_reload: web_stop
+	@$(MAKE) web_start
+
+# workflow formulas (less output but more return codes)
 allseer_test_workflow: allseer_load
 	@[[ -e /proc/all_seer ]] || exit 1
 	@$(MAKE) allseer_unload

@@ -6,7 +6,7 @@
  * Boundary flow:
  *   1) Kernel syscall path triggers a kprobe handler in this file.
  *   2) Handler checks shared guards (as_ready, as_collecting).
- *   3) Handler calls as_emit_event(type, arg).
+ *   3) Handler calls as_emit_event(type, subtype, arg).
  *   4) allseer.c pushes event to kfifo.
  *   5) Under-Seer drains kfifo entries by reading /proc/all_seer.
  *
@@ -25,6 +25,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/binfmts.h>
 #include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/inet.h>
@@ -51,6 +52,25 @@ extern atomic_t as_collecting;
       return 0;                                                                \
   } while (0)
 
+#if AS_HOOK_OPEN
+int as_probe_openat2(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_FORK
+int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_CONNECT
+int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_EXECVE
+int as_probe_execveat_common(struct kprobe *p, struct pt_regs *regs);
+int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_execve(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_execveat(struct kprobe *p, struct pt_regs *regs);
+#endif
+
 /* ════════════════════════════════════════════════════════════════════════════
  * HOOK: open (do_sys_openat2)
  * Captures every file-open/file-create syscall.
@@ -76,7 +96,7 @@ int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
     return 0;
   path[ret] = '\0';
 
-  as_emit_event(AS_TYPE_OPEN, path);
+  as_emit_event(AS_TYPE_OPEN, "none", path);
   return 0;
 }
 #endif /* AS_HOOK_OPEN */
@@ -99,42 +119,10 @@ int as_probe_clone(struct kprobe *p, struct pt_regs *regs) {
   AS_HOOK_GUARD();
 
   get_task_comm(comm, current);
-  as_emit_event(AS_TYPE_FORK, comm);
+  as_emit_event(AS_TYPE_FORK, "none", comm);
   return 0;
 }
 #endif /* AS_HOOK_FORK */
-
-/* ════════════════════════════════════════════════════════════════════════════
- * HOOK: exec (do_execveat_common)
- * Captures execve / execveat.
- *
- * Argument layout:
- *   rdi = int fd, rsi = struct filename *filename,
- *   rdx = struct user_arg_ptr argv, rcx = struct user_arg_ptr envp,
- *   r8  = int flags
- * ═════════════════════════════════════════════════════════════════════════ */
-#if AS_HOOK_EXEC
-int as_probe_execve(struct kprobe *p, struct pt_regs *regs) {
-  /*
-   * regs->si holds a 'struct filename *'.  The first field of that
-   * struct is 'const char *name', pointing to the resolved path.
-   * We dereference it safely with get_kernel_nofault.
-   */
-  struct filename *fn = (struct filename *)(regs->si);
-  const char *kpath = NULL;
-
-  AS_HOOK_GUARD();
-
-  if (!fn)
-    return 0;
-
-  if (get_kernel_nofault(kpath, &fn->name) || !kpath)
-    return 0;
-
-  as_emit_event(AS_TYPE_EXEC, kpath);
-  return 0;
-}
-#endif /* AS_HOOK_EXEC */
 
 /* ════════════════════════════════════════════════════════════════════════════
  * HOOK: connect  (tcp_connect)
@@ -193,7 +181,153 @@ int as_probe_connect(struct kprobe *p, struct pt_regs *regs) {
     return 0; /* not a TCP/IP socket we care about */
   }
 
-  as_emit_event(AS_TYPE_CONNECT, arg);
+  as_emit_event(AS_TYPE_CONNECT, "none", arg);
   return 0;
 }
 #endif /* AS_HOOK_CONNECT */
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: execve / execveat
+ * Captures executable path + argv payload (bounded/truncated).
+ *
+ * do_execveat_common argument layout:
+ *   rdi = int fd
+ *   rsi = struct filename *filename
+ *   rdx = struct user_arg_ptr argv
+ *
+ * do_execve argument layout:
+ *   rdi = struct filename *filename
+ *   rsi = struct user_arg_ptr argv
+ * ═════════════════════════════════════════════════════════════════════════ */
+#if AS_HOOK_EXECVE
+static void as_format_execve_arg(char *dst, size_t dst_sz,
+                                 const char *filename,
+                                 const char __user *const __user *argv) {
+  int i;
+  size_t off = 0;
+
+  if (!dst || dst_sz == 0)
+    return;
+
+  off += scnprintf(dst + off, dst_sz - off, "%s", filename ? filename : "");
+  if (!argv || off >= dst_sz - 1)
+    return;
+
+  off += scnprintf(dst + off, dst_sz - off, " | argv:");
+  for (i = 0; i < 32 && off < dst_sz - 1; i++) {
+    const char __user *uarg = NULL;
+    char arg[80];
+    long copied;
+
+    if (get_user(uarg, &argv[i]))
+      break;
+    if (!uarg)
+      break;
+
+    copied = strncpy_from_user(arg, uarg, sizeof(arg) - 1);
+    if (copied <= 0)
+      break;
+    arg[copied] = '\0';
+
+    off += scnprintf(dst + off, dst_sz - off, " %s", arg);
+
+    if (copied >= (long)(sizeof(arg) - 1)) {
+      off += scnprintf(dst + off, dst_sz - off, "...");
+      break;
+    }
+  }
+
+  if (off >= dst_sz - 1)
+    dst[dst_sz - 2] = '.';
+}
+
+int as_probe_execveat_common(struct kprobe *p, struct pt_regs *regs) {
+  struct filename *fn = (struct filename *)regs->si;
+  const char __user *const __user *argv =
+      (const char __user *const __user *)regs->dx;
+  char arg[256];
+
+  AS_HOOK_GUARD();
+
+  if (!fn || !fn->name)
+    return 0;
+
+  as_format_execve_arg(arg, sizeof(arg), fn->name, argv);
+  as_emit_event(AS_TYPE_EXECVE, "none", arg);
+  return 0;
+}
+
+int as_probe_execve(struct kprobe *p, struct pt_regs *regs) {
+  struct filename *fn = (struct filename *)regs->di;
+  const char __user *const __user *argv =
+      (const char __user *const __user *)regs->si;
+  char arg[256];
+
+  AS_HOOK_GUARD();
+
+  if (!fn || !fn->name)
+    return 0;
+
+  as_format_execve_arg(arg, sizeof(arg), fn->name, argv);
+  as_emit_event(AS_TYPE_EXECVE, "none", arg);
+  return 0;
+}
+
+int as_probe_x64_sys_execve(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  const char __user *filename;
+  const char __user *const __user *argv;
+  char path[128];
+  char arg[256];
+  long ret;
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  filename = (const char __user *)sys_regs->di;
+  argv = (const char __user *const __user *)sys_regs->si;
+
+  if (!filename)
+    return 0;
+
+  ret = strncpy_from_user(path, filename, sizeof(path) - 1);
+  if (ret <= 0)
+    return 0;
+  path[ret] = '\0';
+
+  as_format_execve_arg(arg, sizeof(arg), path, argv);
+  as_emit_event(AS_TYPE_EXECVE, "none", arg);
+  return 0;
+}
+
+int as_probe_x64_sys_execveat(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  const char __user *filename;
+  const char __user *const __user *argv;
+  char path[128];
+  char arg[256];
+  long ret;
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  filename = (const char __user *)sys_regs->si;
+  argv = (const char __user *const __user *)sys_regs->dx;
+
+  if (!filename)
+    return 0;
+
+  ret = strncpy_from_user(path, filename, sizeof(path) - 1);
+  if (ret <= 0)
+    return 0;
+  path[ret] = '\0';
+
+  as_format_execve_arg(arg, sizeof(arg), path, argv);
+  as_emit_event(AS_TYPE_EXECVE, "none", arg);
+  return 0;
+}
+#endif /* AS_HOOK_EXECVE */

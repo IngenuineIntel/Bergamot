@@ -56,7 +56,8 @@ atomic_t as_ready = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
 /* as_emit_event — called from hooks.c */
-void as_emit_event(enum as_event_type type, const char *arg) {
+void as_emit_event(enum as_event_type type, const char *subtype,
+                   const char *arg) {
   struct as_event ev;
   unsigned long flags;
 
@@ -75,6 +76,8 @@ void as_emit_event(enum as_event_type type, const char *arg) {
   ev.ppid = task_ppid_nr(current);
   ev.uid = from_kuid_munged(&init_user_ns, current_uid());
   ev.type = type;
+  strncpy(ev.subtype, subtype ? subtype : "none", sizeof(ev.subtype) - 1);
+  ev.subtype[sizeof(ev.subtype) - 1] = '\0';
   get_task_comm(ev.comm, current);
   strncpy(ev.arg, arg ? arg : "", sizeof(ev.arg) - 1);
   ev.arg[sizeof(ev.arg) - 1] = '\0';
@@ -202,8 +205,8 @@ static bool as_claim_owner_if_unset(void) {
 static const char *const as_type_str[] = {
     [AS_TYPE_OPEN] = "open",
     [AS_TYPE_FORK] = "fork",
-    [AS_TYPE_EXEC] = "exec",
     [AS_TYPE_CONNECT] = "connect",
+  [AS_TYPE_EXECVE] = "execve",
 };
 
 /*
@@ -240,10 +243,10 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
    * bytes, identical to an empty file.
    *
    * Procfs line contract emitted to Under-Seer:
-   *   <ts_ns> <pid> <ppid> <uid> <type> <comm> <arg>\n
+  *   <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>\n
    *
    * Under-Seer maps these fields into JSON keys:
-  *   ts_s, ts_ms, pid, ppid, uid, type, comm, arg
+  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg
    */
 
   struct as_event ev;
@@ -264,12 +267,12 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     }
     spin_unlock_irqrestore(&as_fifo_lock, flags);
 
-    len = snprintf(line, sizeof(line), "%llu %d %d %u %s %s %s\n",
+    len = snprintf(line, sizeof(line), "%llu %d %d %u %s %s %s %s\n",
                    (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
                    (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
                        ? as_type_str[ev.type]
                        : "unknown",
-                   ev.comm, ev.arg);
+             ev.subtype, ev.comm, ev.arg);
 
     if (len <= 0)
       continue;
@@ -309,12 +312,19 @@ extern int as_probe_openat2(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_EXEC
-extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
-#endif
-
 #if AS_HOOK_CONNECT
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_EXECVE
+extern int as_probe_execveat_common(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_execve(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_execveat(struct kprobe *p, struct pt_regs *regs);
+
+static struct kprobe as_execve_probe;
+static bool as_execve_probe_registered;
+static const char *as_execve_probe_symbol;
 #endif
 
 static struct kprobe as_kprobes[] = {
@@ -328,12 +338,6 @@ static struct kprobe as_kprobes[] = {
     {
         .symbol_name = "kernel_clone",
         .pre_handler = as_probe_clone,
-    },
-#endif
-#if AS_HOOK_EXEC
-    {
-        .symbol_name = "__x64_sys_execveat",
-        .pre_handler = as_probe_execve,
     },
 #endif
 #if AS_HOOK_CONNECT
@@ -378,12 +382,50 @@ static int __init allseer_init(void) {
     }
   }
 
+#if AS_HOOK_EXECVE
+  {
+    struct {
+      const char *symbol;
+      kprobe_pre_handler_t handler;
+    } execve_candidates[] = {
+      {.symbol = "__x64_sys_execve", .handler = as_probe_x64_sys_execve},
+      {.symbol = "__x64_sys_execveat", .handler = as_probe_x64_sys_execveat},
+        {.symbol = "do_execveat_common", .handler = as_probe_execveat_common},
+      {.symbol = "do_execveat_common.isra.0", .handler = as_probe_execveat_common},
+        {.symbol = "do_execve", .handler = as_probe_execve},
+    };
+    int j;
+
+    as_execve_probe_registered = false;
+    as_execve_probe_symbol = NULL;
+
+    for (j = 0; j < ARRAY_SIZE(execve_candidates); j++) {
+      as_execve_probe.symbol_name = execve_candidates[j].symbol;
+      as_execve_probe.pre_handler = execve_candidates[j].handler;
+      as_execve_probe.post_handler = NULL;
+
+      ret = register_kprobe(&as_execve_probe);
+      if (ret == 0) {
+        as_execve_probe_registered = true;
+        as_execve_probe_symbol = execve_candidates[j].symbol;
+        break;
+      }
+    }
+
+    if (as_execve_probe_registered)
+      pr_info("all_seer: execve hook registered on %s\n", as_execve_probe_symbol);
+    else
+      pr_warn("all_seer: execve hook unavailable; continuing without execve capture\n");
+  }
+#endif
+
   // mark module as ready
   as_clear_owner_lease();
 
   atomic_set(&as_ready, 1);
 
-  pr_info("all_seer: loaded (%d hook(s) active)\n", as_num_probes);
+    pr_info("all_seer: loaded (%d hook(s) active)\n",
+      as_num_probes + (as_execve_probe_registered ? 1 : 0));
 
   return 0;
 }
@@ -400,6 +442,11 @@ static void __exit allseer_exit(void) {
   // unregistering kprobe hooks
   for (i = 0; i < as_num_probes; i++)
     unregister_kprobe(&as_kprobes[i]);
+
+#if AS_HOOK_EXECVE
+  if (as_execve_probe_registered)
+    unregister_kprobe(&as_execve_probe);
+#endif
 
   // unregistering procfs entries
   proc_remove(as_all_seer_entry);
