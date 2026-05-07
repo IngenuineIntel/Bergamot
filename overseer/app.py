@@ -135,6 +135,11 @@ def graph_fork_exec():
     return render_template("graph/fork_exec.html")
 
 
+@app.route("/graph/lifecycle")
+def graph_lifecycle():
+    return render_template("graph/lifecycle.html")
+
+
 @app.route("/graph/dead-processes")
 def graph_dead_processes():
     return render_template("graph/dead_processes.html")
@@ -294,7 +299,7 @@ if __name__ == "__main__":
     session_name = f"{session_uuid}-{session_salt}-{session_start_unix}.db"
     session_db_path = os.path.join(db_base_dir, session_name)
 
-    store.configure_sqlite(
+    store.prepare_sqlite_session(
         db_path=session_db_path,
         sql_dir=sql_dir,
         db_name=session_name,
@@ -302,7 +307,8 @@ if __name__ == "__main__":
         overseer_ver=BERGAMOT_VERSION,
     )
     atexit.register(store.close)
-    print(f"[over-seer] session db initialized at {session_db_path}", flush=True)
+    print(f"[over-seer] session db pending at {session_db_path}; waiting for agent handshake",
+          flush=True)
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)

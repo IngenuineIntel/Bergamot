@@ -25,7 +25,7 @@ CREATE TABLE overviewdata (
 );
 
 INSERT INTO overviewdata VALUES (
-    :hostname, :kernelver, :distro, :ipv4, :macaddr, :processor,
+    :hostname, :kernelver, :distro, :ipaddr, :macaddr, :processor,
     :processor_vend, :ram_gbs
 );
 

@@ -14,6 +14,12 @@ Integration note:
     app.py wraps store.add_event() to fan out live events to SSE clients,
     so each ingest here updates both in-memory state and browser streams.
 
+Handshake contract:
+    The first JSON object on each TCP connection must be:
+        {"kind": "system_info", ...}
+    Over-Seer uses that payload to initialize the session database before
+    accepting any event or proc_snapshot messages.
+
 Start this before (or alongside) the Flask app:
     from server import start_tcp_server
     start_tcp_server()
@@ -32,8 +38,9 @@ LISTEN_PORT = 9000          # override via environment in app.py if desired
 def _handle_client(conn: socket.socket, addr):
     """One thread per connected Under-Seer agent."""
     print(f"[over-seer] agent connected from {addr}", flush=True)
-    store.agent_connected()
     buf = b""
+    handshake_done = False
+    counted_agent = False
 
     try:
         while True:
@@ -50,14 +57,36 @@ def _handle_client(conn: socket.socket, addr):
                     continue
                 try:
                     ev = json.loads(line.decode("utf-8", errors="replace"))
-                    if isinstance(ev, dict):
-                        store.add_event(ev)
+                    if not isinstance(ev, dict):
+                        continue
+
+                    if not handshake_done:
+                        if ev.get("kind") != "system_info":
+                            print(f"[over-seer] protocol error from {addr}: first message must be system_info",
+                                  flush=True)
+                            return
+
+                        initialized, db_path = store.initialize_sqlite_from_handshake(ev)
+                        if initialized and db_path:
+                            print(f"[over-seer] session db initialized at {db_path}", flush=True)
+
+                        store.agent_connected()
+                        counted_agent = True
+                        handshake_done = True
+                        continue
+
+                    store.add_event(ev)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass  # malformed line — skip silently
+                except Exception as exc:
+                    print(f"[over-seer] connection setup failed for {addr}: {exc}",
+                          flush=True)
+                    return
     except OSError:
         pass
     finally:
-        store.agent_disconnected()
+        if counted_agent:
+            store.agent_disconnected()
         try:
             conn.close()
         except OSError:

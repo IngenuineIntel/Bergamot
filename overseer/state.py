@@ -24,6 +24,20 @@ import time
 from collections import deque
 
 
+def _normalize_system_info(system_info: dict | None) -> dict[str, str | int]:
+    info = system_info or {}
+    return {
+        "hostname": str(info.get("hostname", "") or ""),
+        "kernelver": str(info.get("kernelver", "") or ""),
+        "distro": str(info.get("distro", "") or ""),
+        "ipaddr": str(info.get("ipaddr", "") or ""),
+        "macaddr": str(info.get("macaddr", "") or ""),
+        "processor": str(info.get("processor", "") or ""),
+        "processor_vend": str(info.get("processor_vend", "") or ""),
+        "ram_gbs": int(info.get("ram_gbs", 0) or 0),
+    }
+
+
 class EventStore:
     def __init__(self, max_file_opens: int = 1000, max_network: int = 500,
                  rate_window: int = 10):
@@ -58,6 +72,8 @@ class EventStore:
         self._db_update_proc_end_sql: str | None = None
         self._pending_writes: int = 0
         self._last_commit_mono: float = time.monotonic()
+        self._session_db_config: dict[str, str] | None = None
+        self._session_system_info: dict[str, str | int] | None = None
 
         # Active process lifecycle row mapping (pid -> procs.id)
         self._active_proc_row_ids: dict[int, int] = {}
@@ -70,9 +86,23 @@ class EventStore:
 
     # ── Persistence setup / teardown ───────────────────────────────────────
 
+    def prepare_sqlite_session(self, db_path: str, sql_dir: str,
+                               db_name: str, db_time: str,
+                               overseer_ver: str):
+        with self._lock:
+            self._session_db_config = {
+                "db_path": db_path,
+                "sql_dir": sql_dir,
+                "db_name": db_name,
+                "db_time": db_time,
+                "overseer_ver": overseer_ver,
+            }
+            self._session_system_info = None
+
     def configure_sqlite(self, db_path: str, sql_dir: str,
                          db_name: str, db_time: str,
-                         overseer_ver: str):
+                         overseer_ver: str,
+                         system_info: dict | None = None):
         """Initialize per-session SQLite persistence from SQL files."""
         with self._lock:
             if self._db_conn is not None:
@@ -90,10 +120,12 @@ class EventStore:
             with open(newdb_path, "r", encoding="utf-8") as f:
                 newdb_sql = f.read()
 
+            normalized_info = _normalize_system_info(system_info)
             self._run_sql_statements_with_named_params(conn, newdb_sql, {
                 "db_name": db_name,
                 "db_time": db_time,
                 "overseer_ver": overseer_ver,
+                **normalized_info,
             })
 
             with open(evententry_path, "r", encoding="utf-8") as f:
@@ -115,6 +147,31 @@ class EventStore:
             self._pending_writes = 0
             self._last_commit_mono = time.monotonic()
             self._active_proc_row_ids.clear()
+            self._session_system_info = normalized_info
+
+    def initialize_sqlite_from_handshake(self, system_info: dict) -> tuple[bool, str | None]:
+        with self._lock:
+            normalized_info = _normalize_system_info(system_info)
+            if self._db_conn is not None:
+                if self._session_system_info != normalized_info:
+                    print("[over-seer] agent system info differs from session origin; keeping existing database metadata",
+                          flush=True)
+                return False, self._db_path
+
+            if self._session_db_config is None:
+                raise RuntimeError("session database not prepared")
+
+            config = dict(self._session_db_config)
+
+        self.configure_sqlite(
+            db_path=config["db_path"],
+            sql_dir=config["sql_dir"],
+            db_name=config["db_name"],
+            db_time=config["db_time"],
+            overseer_ver=config["overseer_ver"],
+            system_info=normalized_info,
+        )
+        return True, config["db_path"]
 
     def close(self):
         with self._lock:
@@ -133,6 +190,7 @@ class EventStore:
         self._db_update_proc_end_sql = None
         self._db_path = None
         self._active_proc_row_ids.clear()
+        self._session_system_info = None
 
     def _run_sql_statements_with_named_params(self, conn: sqlite3.Connection,
                                               sql_text: str,

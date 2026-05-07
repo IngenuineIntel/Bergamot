@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """
+System info handshake (first JSON object on each TCP connection):
+    {"kind": "system_info", "hostname": "<str>", "kernelver": "<str>",
+     "distro": "<str>", "ipaddr": "<str>", "macaddr": "<str>",
+     "processor": "<str>", "processor_vend": "<str>",
+     "ram_gbs": <int>}
+
 Syscall wire format (one JSON object per line):
     {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
      "ppid": <int>, "uid": <int>,
@@ -16,6 +22,7 @@ BERGAMOT_VERSION = "0.1"
 import contextlib
 import json
 import os
+import platform
 import socket
 import sys
 import time
@@ -30,8 +37,13 @@ def envvar_fetch(name: str, valtype: type, default):
     except TypeError: raise AssertionError(
         f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
     )
-    try: return valtype(os.environ[str])
-    except: return default
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return valtype(raw)
+    except Exception:
+        return default
 
 # ── SWITCHES ─────────────────────────────────────────────────────────────── #
 """
@@ -43,14 +55,132 @@ WIRE_BATCH_MAX  The max amount of data to be read or sent ever iteration.
 WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
-WIRE_PORT      = envvar_fetch("BEGRAMOT_WIRE_PORT", int, 12046)
-WIRE_HZ        = envvar_fetch("BEGAMOT_WIRE_HZ", float, 0.25)
+WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
+WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 0.25)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
+PROC_PATH      = "/proc/all_seer"
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "connect", "execve")
+
+
+def _read_first_line(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.readline().strip()
+    except OSError:
+        return ""
+
+
+def _read_os_release() -> str:
+    pretty_name = ""
+    name = ""
+    version = ""
+
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8", errors="replace") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                value = value.strip().strip('"')
+                if key == "PRETTY_NAME":
+                    pretty_name = value
+                elif key == "NAME":
+                    name = value
+                elif key == "VERSION":
+                    version = value
+    except OSError:
+        return ""
+
+    if pretty_name:
+        return pretty_name
+    return " ".join(part for part in (name, version) if part).strip()
+
+
+def _get_primary_ipv4() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0] or "")
+    except OSError:
+        return ""
+
+
+def _get_primary_interface() -> str:
+    try:
+        with open("/proc/net/route", "r", encoding="utf-8", errors="replace") as fh:
+            next(fh, None)
+            for line in fh:
+                cols = line.split()
+                if len(cols) >= 2 and cols[1] == "00000000":
+                    return cols[0]
+    except OSError:
+        pass
+    return ""
+
+
+def _get_mac_address(iface: str) -> str:
+    if not iface:
+        return ""
+    return _read_first_line(f"/sys/class/net/{iface}/address")
+
+
+def _read_cpu_info() -> tuple[str, str]:
+    model = ""
+    vendor = ""
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or ":" not in line:
+                    continue
+                key, value = [part.strip() for part in line.split(":", 1)]
+                if key == "model name" and not model:
+                    model = value
+                elif key == "vendor_id" and not vendor:
+                    vendor = value
+                if model and vendor:
+                    break
+    except OSError:
+        return "", ""
+    return model, vendor
+
+
+def _read_ram_gbs() -> int:
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:
+            for raw_line in fh:
+                if not raw_line.startswith("MemTotal:"):
+                    continue
+                parts = raw_line.split()
+                if len(parts) < 2:
+                    return 0
+                kib = int(parts[1])
+                return max(1, round(kib / (1024 * 1024)))
+    except (OSError, ValueError):
+        return 0
+    return 0
+
+
+def collect_system_info() -> dict:
+    uname = platform.uname()
+    primary_iface = _get_primary_interface()
+    processor, processor_vend = _read_cpu_info()
+    return {
+        "kind": "system_info",
+        "hostname": socket.gethostname(),
+        "kernelver": " ".join(part for part in (uname.release, uname.machine) if part).strip(),
+        "distro": _read_os_release(),
+        "ipaddr": _get_primary_ipv4(),
+        "macaddr": _get_mac_address(primary_iface),
+        "processor": processor,
+        "processor_vend": processor_vend,
+        "ram_gbs": _read_ram_gbs(),
+    }
 
 
 def parse_line(line: str) -> dict | None:
@@ -147,6 +277,7 @@ class Sender:
         self._port = port
         self._sock: socket.socket | None = None
         self._backoff = 1.0
+        self._system_info = collect_system_info()
 
     def _connect(self) -> bool:
         try:
@@ -156,6 +287,9 @@ class Sender:
             s.settimeout(None)
             self._sock = s
             self._backoff = 1.0
+            if not self._send_objects([self._system_info]):
+                self._close()
+                raise OSError("failed to send system_info handshake")
             print(f"[under-seer] connected to {self._host}:{self._port}",
                   flush=True)
             return True
@@ -178,7 +312,13 @@ class Sender:
         if not events:
             return True
 
-        payload = "\n".join(json.dumps(e) for e in events) + "\n"
+        return self._send_objects(events)
+
+    def _send_objects(self, payloads: list[dict]) -> bool:
+        if self._sock is None:
+            return False
+
+        payload = "\n".join(json.dumps(e) for e in payloads) + "\n"
         data = payload.encode("utf-8")
 
         try:
@@ -217,9 +357,9 @@ def main():
         # this process is expected to be the exclusive authorized reader.
         batch: list[dict] = []
         try:
-            with open("/proc/all_seer", "r") as fh:
+            with open(PROC_PATH, "r") as fh:
                 if not lease_announced:
-                    print("[under-seer] /proc/all_seer access claimed",
+                    print(f"[under-seer] {PROC_PATH} access claimed",
                           flush=True)
                     lease_announced = True
                 for raw_line in fh:

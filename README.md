@@ -7,8 +7,11 @@ contains three programs, which operate as follows:
  - "The Allseer": Kernel module that creates events from syscall probes and
    exfiltrates the data through `/proc/all_seer` (currently open, fork,
    connect, and execve families).
- - "The Underseer": Reads said data and sends it to another device
- - "The Overseer": Receives data and displays it on a webpage.
+ - "The Underseer": Reads said data and sends it to another device. Each TCP
+   connection now begins with a system-information handshake describing the
+   host it is running on.
+ - "The Overseer": Receives data and displays it on a webpage. Session
+   databases are now created only when that Underseer handshake arrives.
 
 ## Building
 
@@ -60,6 +63,17 @@ settings. Currently, they are as follows:
  reading/sending information, default is 0.25 (Hz)
  - `BERGAMOT_BATCH_MAX`: The maximum amount of syscall entries that can be sent
  via the wire protocol at once
+
+### Wire Protocol
+
+Each Underseer TCP connection must begin with one NDJSON object of the form:
+
+```json
+{"kind":"system_info","hostname":"...","kernelver":"...","distro":"...","ipaddr":"...","macaddr":"...","processor":"...","processor_vend":"...","ram_gbs":16}
+```
+
+Only after that handshake does the Overseer initialize the session database and
+accept syscall events and process snapshots.
 
 ### Compiling For Use
 
