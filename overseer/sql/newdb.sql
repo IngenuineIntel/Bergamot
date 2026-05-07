@@ -13,6 +13,22 @@ INSERT INTO metadata (
     :db_name, :db_time, :overseer_ver
 );
 
+CREATE TABLE overviewdata (
+    hostname TEXT, -- computer hostname
+    kernelver TEXT, -- kernel version
+    distro TEXT, -- *nix distribution
+    ipaddr TEXT, -- IP address
+    macaddr TEXT, -- MAC address
+    processor TEXT, -- processor
+    processor_vend TEXT, -- processor vendor
+    ram_gbs INTEGER -- nr GBs of RAM
+);
+
+INSERT INTO overviewdata VALUES (
+    :hostname, :kernelver, :distro, :ipv4, :macaddr, :processor,
+    :processor_vend, :ram_gbs
+);
+
 CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts_s INTEGER DEFAULT (unixepoch()), -- UNIX time

@@ -132,9 +132,14 @@ function fmtUptime(seconds) {
 }
 
 function fmtEventTs(ts_s, ts_ms) {
-  const sec = Number(ts_s ?? 0);
-  const ms = Number(ts_ms ?? 0);
-  return `${sec}.${String(ms).padStart(3, "0")}`;
+  const date = new Date(ts_s * 1000 + ts_ms);
+  return date.toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3
+  }) + " " + date.toLocaleDateString('en-US');
 }
 
 function applyStats(stats) {
@@ -356,7 +361,7 @@ function processDetailsMarkup(row) {
     ["Exec", row.exec_arg ?? ""],
     ["Running", boolToYesNo(row.running)],
     ["Opens", row.open_count ?? 0],
-    ["Connects", row.connect_count ?? 0],
+    ["Connections", row.connect_count ?? 0],
     ["First Open", row.first_open ?? ""],
     ["First Connect", row.first_connect ?? ""],
   ];
@@ -512,11 +517,11 @@ function renderLifecycleRows(rows) {
       <td>${esc(row.uid ?? "")}</td>
       <td>${esc(row.comm ?? "")}</td>
       <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
-      <td>${row.running ? "yes" : "no"}</td>
+      <!--<td>${row.running ? "yes" : "no"}</td>
       <td>${esc(row.open_count ?? 0)}</td>
       <td>${esc(row.connect_count ?? 0)}</td>
       <td class="arg-cell">${esc(row.first_open ?? "")}</td>
-      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
     `;
     fragment.appendChild(tr);
   });
@@ -540,11 +545,11 @@ function renderDeadProcessesRows(rows) {
       <td>${esc(row.uid ?? "")}</td>
       <td>${esc(row.comm ?? "")}</td>
       <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
-      <td>${row.running ? "yes" : "no"}</td>
+      <!--<td>${row.running ? "yes" : "no"}</td>
       <td>${esc(row.open_count ?? 0)}</td>
       <td>${esc(row.connect_count ?? 0)}</td>
       <td class="arg-cell">${esc(row.first_open ?? "")}</td>
-      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>
+      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
     `;
     fragment.appendChild(tr);
   });

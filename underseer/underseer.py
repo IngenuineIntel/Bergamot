@@ -42,11 +42,12 @@ WIRE_HZ         The frequency the procfile is read and a network packet sent.
 WIRE_BATCH_MAX  The max amount of data to be read or sent ever iteration.
 WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
-WIRE_DST  = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
-WIRE_PORT = envvar_fetch("BEGRAMOT_WIRE_PORT", int, 12046)
-WIRE_HZ   = envvar_fetch("BEGAMOT_WIRE_HZ", float, 0.25)
+WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
+WIRE_PORT      = envvar_fetch("BEGRAMOT_WIRE_PORT", int, 12046)
+WIRE_HZ        = envvar_fetch("BEGAMOT_WIRE_HZ", float, 0.25)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
+WIRE_TIMEOUT   = 5
 # ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
 _TYPE_NAMES = ("open", "fork", "connect", "execve")
@@ -150,7 +151,7 @@ class Sender:
     def _connect(self) -> bool:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(10)
+            s.settimeout(WIRE_TIMEOUT)
             s.connect((self._host, self._port))
             s.settimeout(None)
             self._sock = s
