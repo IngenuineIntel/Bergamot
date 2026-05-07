@@ -8,6 +8,76 @@
     "/graph/dead-processes",
   ]);
   const reportedHeights = new Map();
+  let manualLockedHeight = null;
+
+  function getLockedFrames() {
+    const lifecycleFrame = getFrameByPath("/graph/lifecycle");
+    const deadProcessesFrame = getFrameByPath("/graph/dead-processes");
+    if (!lifecycleFrame || !deadProcessesFrame) return null;
+    return [lifecycleFrame, deadProcessesFrame];
+  }
+
+  function applyLockedHeight(height) {
+    const frames = getLockedFrames();
+    if (!frames) return;
+
+    const syncedHeight = Math.max(MIN_HEIGHT, Math.round(Number(height) || 0));
+    frames.forEach((frame) => {
+      frame.style.height = `${syncedHeight}px`;
+    });
+  }
+
+  function autoLockedHeight() {
+    return Math.max(
+      MIN_HEIGHT,
+      reportedHeights.get("/graph/lifecycle") || MIN_HEIGHT,
+      reportedHeights.get("/graph/dead-processes") || MIN_HEIGHT,
+    );
+  }
+
+  function initLockedFrameResizer() {
+    const details = document.querySelector(".iframe-dropdown-group");
+    if (!details) return;
+
+    const grid = details.querySelector(".iframe-dropdown-grid");
+    if (!grid) return;
+
+    const lockedFrames = getLockedFrames();
+    if (!lockedFrames) return;
+
+    const handle = document.createElement("div");
+    handle.className = "graph-frame-bottom-resizer";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "horizontal");
+    handle.setAttribute("aria-label", "Resize process lifecycle frames");
+    details.appendChild(handle);
+
+    handle.addEventListener("mousedown", (downEvent) => {
+      downEvent.preventDefault();
+
+      const [frame] = getLockedFrames() || [];
+      if (!frame) return;
+
+      const startY = downEvent.clientY;
+      const startHeight = Math.round(frame.getBoundingClientRect().height);
+      document.body.classList.add("is-resizing-frames");
+
+      const onMouseMove = (moveEvent) => {
+        const deltaY = moveEvent.clientY - startY;
+        manualLockedHeight = Math.max(MIN_HEIGHT, startHeight + deltaY);
+        applyLockedHeight(manualLockedHeight);
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.classList.remove("is-resizing-frames");
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    });
+  }
 
   function getFrameByPath(path) {
     const frames = document.querySelectorAll(frameSelector);
@@ -33,18 +103,12 @@
     if (LOCKED_HEIGHT_PATHS.has(data.path)) {
       reportedHeights.set(data.path, nextHeight);
 
-      const lifecycleFrame = getFrameByPath("/graph/lifecycle");
-      const deadProcessesFrame = getFrameByPath("/graph/dead-processes");
-      if (!lifecycleFrame || !deadProcessesFrame) return;
+      if (manualLockedHeight != null) {
+        applyLockedHeight(manualLockedHeight);
+        return;
+      }
 
-      const syncedHeight = Math.max(
-        MIN_HEIGHT,
-        reportedHeights.get("/graph/lifecycle") || MIN_HEIGHT,
-        reportedHeights.get("/graph/dead-processes") || MIN_HEIGHT,
-      );
-
-      lifecycleFrame.style.height = `${syncedHeight}px`;
-      deadProcessesFrame.style.height = `${syncedHeight}px`;
+      applyLockedHeight(autoLockedHeight());
       return;
     }
 
@@ -52,4 +116,10 @@
     if (!frame) return;
     frame.style.height = `${nextHeight}px`;
   });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initLockedFrameResizer, { once: true });
+  } else {
+    initLockedFrameResizer();
+  }
 })();

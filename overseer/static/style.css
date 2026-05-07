@@ -257,6 +257,31 @@ main {
   gap: 16px;
 }
 
+.graph-frame-bottom-resizer {
+  height: 14px;
+  margin-top: 6px;
+  cursor: ns-resize;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, var(--accent));
+  position: relative;
+}
+
+.graph-frame-bottom-resizer::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 42px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-dim) 60%, var(--accent));
+  transform: translateX(-50%);
+}
+
+body.is-resizing-frames {
+  cursor: ns-resize;
+  user-select: none;
+}
+
 body.iframe-page {
   min-height: 0;
 }
