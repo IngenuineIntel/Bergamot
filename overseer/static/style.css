@@ -283,16 +283,32 @@ body.is-resizing-frames {
 }
 
 body.iframe-page {
-  min-height: 0;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
 }
 
 body.iframe-page main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   padding: 0;
   gap: 0;
 }
 
 body.iframe-page .card.full-width {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   width: 100%;
+}
+
+body.iframe-page .table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .overview-grid {
