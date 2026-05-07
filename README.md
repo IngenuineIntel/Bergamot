@@ -6,7 +6,7 @@ contains three programs, which operate as follows:
 
  - "The Allseer": Kernel module that creates events from syscall probes and
    exfiltrates the data through `/proc/all_seer` (currently open, fork,
-   connect, and execve families).
+   connect, execve, plus optional accept/unlink/rename/setuid families).
  - "The Underseer": Reads said data and sends it to another device. Each TCP
    connection now begins with a system-information handshake describing the
    host it is running on.
@@ -22,6 +22,20 @@ intended to be running on.
 
 There are various compilation settings that need to be gone through beforehand.
 They are in `allseer/switches.h`.
+
+### Hook Switches
+
+All syscall hook families are controlled at compile time in
+`allseer/switches.h`.
+
+- Default-on: `AS_HOOK_OPEN`, `AS_HOOK_FORK`, `AS_HOOK_CONNECT`,
+  `AS_HOOK_EXECVE`
+- Default-off (Phase 2): `AS_HOOK_ACCEPT`, `AS_HOOK_UNLINK`,
+  `AS_HOOK_RENAME`, `AS_HOOK_SETUID`
+
+Subtype semantics now identify the concrete syscall entrypoint variant (for
+example `__x64_sys_setuid` vs `__x64_sys_setresuid`). Detailed call data is
+encoded in the existing `arg` field so wire compatibility stays unchanged.
 
 ### Compiling For Testing
 
@@ -74,6 +88,12 @@ Each Underseer TCP connection must begin with one NDJSON object of the form:
 
 Only after that handshake does the Overseer initialize the session database and
 accept syscall events and process snapshots.
+
+The syscall event line contract from `/proc/all_seer` remains unchanged:
+
+`<ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>`
+
+Phase 2 enriched `subtype` and `arg` contents but did not change line shape.
 
 ### Compiling For Use
 

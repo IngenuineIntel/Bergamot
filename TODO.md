@@ -6,8 +6,10 @@ before v1.0
  - [X] Refactor Underseer timestamps to have a second timestamp in milliseconds
  - [ ] Make the process snapshot frequency (poll_freq*muliplier)
  - [ ] Improve webpage usability
- - [ ] Deslopify The Underseer
- - [ ] Refactor procfile claiming system (deslopify)
+ - [X] Deslopify The Underseer
+ - [X] Refactor procfile claiming system (deslopify)
+ - [X] Phase 2 backend hook expansion (new optional syscall families,
+ subtype enrichment, stable wire format)
  - [ ] Improve webpage more (filters, syscall-specific pages, logs, history)
  - [ ] Plan out end user usage and implement
  - [ ] Scripts for compilation into distro packages (maybe in different repo)

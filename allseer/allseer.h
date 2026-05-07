@@ -31,6 +31,14 @@ enum as_event_type {
   AS_TYPE_FORK,
   AS_TYPE_CONNECT,
   AS_TYPE_EXECVE,
+  AS_TYPE_ACCEPT,
+  AS_TYPE_UNLINK,
+  AS_TYPE_RENAME,
+  AS_TYPE_SETUID,
+  AS_TYPE_SETGID,
+  AS_TYPE_SETREUID,
+  AS_TYPE_CAPSET,
+  AS_TYPE_KEYCTL,
 };
 
 /* ── Event struct ────────────────────────────────────────────────────── */

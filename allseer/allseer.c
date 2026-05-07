@@ -200,7 +200,15 @@ static const char *const as_type_str[] = {
     [AS_TYPE_OPEN] = "open",
     [AS_TYPE_FORK] = "fork",
     [AS_TYPE_CONNECT] = "connect",
-  [AS_TYPE_EXECVE] = "execve",
+    [AS_TYPE_EXECVE] = "execve",
+    [AS_TYPE_ACCEPT] = "accept",
+    [AS_TYPE_UNLINK] = "unlink",
+    [AS_TYPE_RENAME] = "rename",
+    [AS_TYPE_SETUID] = "setuid",
+  [AS_TYPE_SETGID] = "setgid",
+  [AS_TYPE_SETREUID] = "setreuid",
+  [AS_TYPE_CAPSET] = "capset",
+  [AS_TYPE_KEYCTL] = "keyctl",
 };
 
 /*
@@ -310,6 +318,42 @@ extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
 #endif
 
+#if AS_HOOK_ACCEPT
+extern int as_probe_x64_sys_accept4(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_UNLINK
+extern int as_probe_x64_sys_unlinkat(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_RENAME
+extern int as_probe_x64_sys_renameat2(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_SETUID
+extern int as_probe_x64_sys_setuid(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_setresuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_SETGID
+extern int as_probe_x64_sys_setgid(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_setresgid(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_setegid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_SETREUID
+extern int as_probe_x64_sys_setreuid(struct kprobe *p, struct pt_regs *regs);
+extern int as_probe_x64_sys_seteuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_CAPSET
+extern int as_probe_x64_sys_capset(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_KEYCTL
+extern int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs);
+#endif
+
 #if AS_HOOK_EXECVE
 extern int as_probe_execveat_common(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_execve(struct kprobe *p, struct pt_regs *regs);
@@ -339,6 +383,70 @@ static struct kprobe as_kprobes[] = {
         .symbol_name = "tcp_connect",
         .pre_handler = as_probe_connect,
     },
+#endif
+#if AS_HOOK_ACCEPT
+  {
+    .symbol_name = "__x64_sys_accept4",
+    .pre_handler = as_probe_x64_sys_accept4,
+  },
+#endif
+#if AS_HOOK_UNLINK
+  {
+    .symbol_name = "__x64_sys_unlinkat",
+    .pre_handler = as_probe_x64_sys_unlinkat,
+  },
+#endif
+#if AS_HOOK_RENAME
+  {
+    .symbol_name = "__x64_sys_renameat2",
+    .pre_handler = as_probe_x64_sys_renameat2,
+  },
+#endif
+#if AS_HOOK_SETUID
+  {
+    .symbol_name = "__x64_sys_setuid",
+    .pre_handler = as_probe_x64_sys_setuid,
+  },
+  {
+    .symbol_name = "__x64_sys_setresuid",
+    .pre_handler = as_probe_x64_sys_setresuid,
+  },
+#endif
+#if AS_HOOK_SETGID
+  {
+    .symbol_name = "__x64_sys_setgid",
+    .pre_handler = as_probe_x64_sys_setgid,
+  },
+  {
+    .symbol_name = "__x64_sys_setresgid",
+    .pre_handler = as_probe_x64_sys_setresgid,
+  },
+  {
+    .symbol_name = "__x64_sys_setegid",
+    .pre_handler = as_probe_x64_sys_setegid,
+  },
+#endif
+#if AS_HOOK_SETREUID
+  {
+    .symbol_name = "__x64_sys_setreuid",
+    .pre_handler = as_probe_x64_sys_setreuid,
+  },
+  {
+    .symbol_name = "__x64_sys_seteuid",
+    .pre_handler = as_probe_x64_sys_seteuid,
+  },
+#endif
+#if AS_HOOK_CAPSET
+  {
+    .symbol_name = "__x64_sys_capset",
+    .pre_handler = as_probe_x64_sys_capset,
+  },
+#endif
+#if AS_HOOK_KEYCTL
+  {
+    .symbol_name = "__x64_sys_keyctl",
+    .pre_handler = as_probe_x64_sys_keyctl,
+  },
 #endif
 };
 

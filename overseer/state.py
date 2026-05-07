@@ -242,6 +242,8 @@ class EventStore:
 
     def _update_lifecycle_row_from_event(self, row: dict, ev: dict,
                                          ts_s: int, ts_ms: int):
+        arg_primary = str(ev.get("arg1", ev.get("arg", "")) or "")
+
         row["ppid"] = int(ev.get("ppid", row["ppid"]) or 0)
         row["uid"] = int(ev.get("uid", row["uid"]) or 0)
 
@@ -261,15 +263,48 @@ class EventStore:
             row["fork_seen"] = True
         elif ev_type == "execve":
             row["exec_seen"] = True
-            row["exec_arg"] = str(ev.get("arg", "") or "")
+            row["exec_arg"] = arg_primary
         elif ev_type == "open":
             row["open_count"] += 1
             if not row["first_open"]:
-                row["first_open"] = str(ev.get("arg", "") or "")
+                row["first_open"] = arg_primary
         elif ev_type == "connect":
             row["connect_count"] += 1
             if not row["first_connect"]:
-                row["first_connect"] = str(ev.get("arg", "") or "")
+                row["first_connect"] = arg_primary
+
+    def _normalize_event_payload(self, ev: dict) -> dict:
+        ts_s = int(ev.get("ts_s", 0) or 0)
+        ts_ms = int(ev.get("ts_ms", 0) or 0)
+
+        # Backward compatibility for older Under-Seer payloads with a
+        # single nanosecond timestamp field.
+        if (ts_s == 0 and ts_ms == 0) and "ts" in ev:
+            legacy_ns = int(ev.get("ts", 0) or 0)
+            ts_s, rem_ns = divmod(legacy_ns, 1_000_000_000)
+            ts_ms = rem_ns // 1_000_000
+
+        ev_type = str(ev.get("type", "") or "")
+        subtype = str(ev.get("subtype", "none") or "none")
+        comm = str(ev.get("comm", "") or "")
+        arg1 = str(ev.get("arg1", ev.get("arg", "")) or "")
+        arg2 = str(ev.get("arg2", "") or "")
+
+        normalized = {
+            "ts_s": ts_s,
+            "ts_ms": ts_ms,
+            "pid": int(ev.get("pid", 0) or 0),
+            "ppid": int(ev.get("ppid", 0) or 0),
+            "uid": int(ev.get("uid", 0) or 0),
+            "type": ev_type,
+            "subtype": subtype,
+            "comm": comm,
+            "arg1": arg1,
+            "arg2": arg2,
+            # Keep legacy key for existing UI/client code paths.
+            "arg": arg1,
+        }
+        return normalized
 
     def _mark_lifecycle_rows_from_snapshot_locked(self, ts_s: int, ts_ms: int,
                                                   old_processes: dict[int, dict],
@@ -444,36 +479,29 @@ class EventStore:
                 self._apply_process_snapshot_locked(ev)
                 return
 
-            pid = ev.get("pid", 0)
-            ts_s = int(ev.get("ts_s", 0) or 0)
-            ts_ms = int(ev.get("ts_ms", 0) or 0)
-
-            # Backward compatibility for older Under-Seer payloads with a
-            # single nanosecond timestamp field.
-            if (ts_s == 0 and ts_ms == 0) and "ts" in ev:
-                legacy_ns = int(ev.get("ts", 0) or 0)
-                ts_s, rem_ns = divmod(legacy_ns, 1_000_000_000)
-                ts_ms = rem_ns // 1_000_000
-
-            ev["ts_s"] = ts_s
-            ev["ts_ms"] = ts_ms
-            ev["subtype"] = str(ev.get("subtype", "none") or "none")
-
-            comm = ev.get("comm", "")
-
-            ev_type = ev.get("type", "")
-            arg     = ev.get("arg", "")
+            ev = self._normalize_event_payload(ev)
+            pid = ev["pid"]
+            ts_s = ev["ts_s"]
+            ts_ms = ev["ts_ms"]
+            ev_type = ev["type"]
 
             record = {
                 "ts_s": ts_s,
                 "ts_ms": ts_ms,
                 "pid":  pid,
-                "ppid": ev.get("ppid", 0),
-                "uid": ev.get("uid", 0),
-                "comm": comm,
-                "arg":  arg,
+                "ppid": ev["ppid"],
+                "uid": ev["uid"],
+                "comm": ev["comm"],
+                "arg": ev["arg"],
+                "arg1": ev["arg1"],
+                "arg2": ev["arg2"],
                 "type": ev_type,
+                "subtype": ev["subtype"],
             }
+
+            # Database persistence is type-agnostic and does not depend on
+            # hardcoded syscall names.
+            self._persist_event_locked(ev)
 
             if ev_type == "open":
                 self.file_opens.append(record)
@@ -484,11 +512,13 @@ class EventStore:
                     "ts_s":  ts_s,
                     "ts_ms": ts_ms,
                     "pid":   pid,
-                    "ppid":  ev.get("ppid", 0),
-                    "uid":   ev.get("uid", 0),
+                    "ppid":  ev["ppid"],
+                    "uid":   ev["uid"],
                     "type":  ev_type,
-                    "comm":  comm,
-                    "arg":   arg,
+                    "comm":  ev["comm"],
+                    "arg":   ev["arg"],
+                    "arg1":  ev["arg1"],
+                    "arg2":  ev["arg2"],
                 }
                 self.fork_events.append(fork_record)
                 self.fork_exec_events.append(fork_record)
@@ -497,11 +527,13 @@ class EventStore:
                     "ts_s":  ts_s,
                     "ts_ms": ts_ms,
                     "pid":   pid,
-                    "ppid":  ev.get("ppid", 0),
-                    "uid":   ev.get("uid", 0),
+                    "ppid":  ev["ppid"],
+                    "uid":   ev["uid"],
                     "type":  ev_type,
-                    "comm":  comm,
-                    "arg":   arg,
+                    "comm":  ev["comm"],
+                    "arg":   ev["arg"],
+                    "arg1":  ev["arg1"],
+                    "arg2":  ev["arg2"],
                 }
                 self.execve_events.append(exec_record)
                 self.fork_exec_events.append(exec_record)
@@ -519,9 +551,9 @@ class EventStore:
                 if row is None:
                     row = self._new_lifecycle_row(
                         pid=pid,
-                        ppid=int(ev.get("ppid", 0) or 0),
-                        uid=int(ev.get("uid", 0) or 0),
-                        comm=str(ev.get("comm", "") or ""),
+                        ppid=ev["ppid"],
+                        uid=ev["uid"],
+                        comm=ev["comm"],
                         ts_s=ts_s,
                         ts_ms=ts_ms,
                         running=pid in self.processes,
@@ -530,8 +562,6 @@ class EventStore:
 
                 self._update_lifecycle_row_from_event(row, ev, ts_s, ts_ms)
                 row["running"] = pid in self.processes
-
-            self._persist_event_locked(ev)
 
     def _apply_process_snapshot_locked(self, snap: dict):
         ts_s = int(snap.get("ts_s", 0) or 0)
