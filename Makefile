@@ -8,6 +8,8 @@ MODULE_KO  := $(MODULE_DIR)/build/allseer_kmod.ko
 
 UNDERSEER_DIR   := ./underseer
 UNDERSEER_PYENV := ./underseer/env
+UNDERSEER_SETUP := $(UNDERSEER_DIR)/setup.py
+UNDERSEER_PYTHON := $(abspath $(UNDERSEER_PYENV))/bin/python3
 OVERSEER_DIR    := ./overseer
 OVERSEER_PYENV  := ./overseer/env
 
@@ -35,13 +37,19 @@ allseer_test: allseer_load
 # underseer
 underseer_prep_env:
 	-[[ -e $(UNDERSEER_PYENV) ]] || python3 -m venv $(UNDERSEER_PYENV)
-	-$(UNDERSEER_PYENV)/bin/python3 -m pip install -r $(UNDERSEER_DIR)/requirements.txt
+	-$(UNDERSEER_PYTHON) -m pip install -r $(UNDERSEER_DIR)/requirements.txt
 
-underseer_run: underseer_prep_env
-	sudo $(UNDERSEER_PYENV)/bin/python3 $(UNDERSEER_DIR)/underseer.py
+underseer_build: underseer_prep_env
+	cd $(UNDERSEER_DIR) && $(UNDERSEER_PYTHON) $(notdir $(UNDERSEER_SETUP)) build_ext --inplace
+
+underseer_run: underseer_build
+	sudo $(UNDERSEER_PYTHON) -c "import os, sys; sys.path.insert(0, os.path.abspath('$(UNDERSEER_DIR)')); import underseer; underseer.main()"
 
 underseer_clean:
-	-rm -r $(UNDERSEER_DIR)/__pycache__
+	-rm -rf $(UNDERSEER_DIR)/build
+	-rm -rf $(UNDERSEER_DIR)/__pycache__
+	-rm -f $(UNDERSEER_DIR)/underseer.c
+	-rm -f $(UNDERSEER_DIR)/underseer.*.so
 
 # overseer
 overseer_prep_env:

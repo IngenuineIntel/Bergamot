@@ -17,7 +17,18 @@ Process snapshot wire format (one JSON object per line):
          "processes": [{"pid": <int>, "ppid": <int>, "uid": <int>,
                                         "comm": "<str>", "threads": <int>}, ...]}
 """
-BERGAMOT_VERSION = "0.1"
+# ── CYTHON CDEFS ─────────────────────────────────────────────────────────── #
+cdef str BERGAMOT_VERSION
+cdef str WIRE_DST
+cdef int WIRE_PORT
+cdef float WIRE_HZ
+cdef int WIRE_BATCH_MAX
+cdef int WIRE_REC_MAX
+cdef int WIRE_TIMEOUT
+cdef str PROC_PATH
+# ── END CYTHON CDEFS ─────────────────────────────────────────────────────── #
+
+BERGAMOT_VERSION = "1.0"
 
 import contextlib
 import json
@@ -61,9 +72,11 @@ WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
-# ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────────
 
-_TYPE_NAMES = ("open", "fork", "connect", "execve")
+# ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────── #
+
+cdef const char *_TYPE_NAMES[4]
+_TYPE_NAMES[:] = ["open", "fork", "connect", "execve"]
 
 
 def _read_first_line(path: str) -> str:
@@ -182,7 +195,6 @@ def collect_system_info() -> dict:
         "ram_gbs": _read_ram_gbs(),
     }
 
-
 def parse_line(line: str) -> dict | None:
     """
     Parse one space-separated procfs event line.
@@ -192,34 +204,54 @@ def parse_line(line: str) -> dict | None:
     The arg field may contain spaces (e.g. command arguments), so we split
     into at most 8 tokens and treat everything after the 7th token as <arg>.
     """
+
+    cdef list parts
+    cdef str ts_raw
+    cdef str pid_raw
+    cdef str ppid_raw
+    cdef str uid_raw
+    cdef str type_raw
+    cdef str subtype_raw
+    cdef str comm
+    cdef str arg
+    cdef long long ts_ns
+    cdef long long ts_s
+    cdef long long rem_ns
+
     line = line.strip()
     if not line:
         return None
 
-    parts = line.split(None, 7)          # split on whitespace, max 8 parts
+    parts = line.split(None, 7)
     if len(parts) < 8:
         return None
 
-    ts_raw, pid_raw, ppid_raw, uid_raw, type_raw, subtype_raw, comm, arg = parts
+    ts_raw = parts[0]
+    pid_raw = parts[1]
+    ppid_raw = parts[2]
+    uid_raw = parts[3]
+    type_raw = parts[4]
+    subtype_raw = parts[5]
+    comm = parts[6]
+    arg = parts[7]
 
     try:
         ts_ns = int(ts_raw)
-        ts_s, rem_ns = divmod(ts_ns, 1_000_000_000)
-        ts_ms = rem_ns // 1_000_000
+        ts_s = ts_ns // 1_000_000_000
+        rem_ns = ts_ns % 1_000_000_000
         return {
             "ts_s": int(ts_s),
-            "ts_ms": int(ts_ms),
-            "pid":  int(pid_raw),
+            "ts_ms": int(rem_ns // 1_000_000),
+            "pid": int(pid_raw),
             "ppid": int(ppid_raw),
-            "uid":  int(uid_raw),
+            "uid": int(uid_raw),
             "type": type_raw,
             "subtype": subtype_raw,
             "comm": comm,
-            "arg":  arg,
+            "arg": arg,
         }
     except ValueError:
         return None
-
 
 def collect_process_snapshot() -> dict:
     now = time.time()
@@ -269,17 +301,24 @@ def collect_process_snapshot() -> dict:
     }
 
 
-# ── TCP sender with reconnect back-off ───────────────────────────────────────
+# ── TCP sender with reconnect back-off ───────────────────────────────────── #
 
-class Sender:
-    def __init__(self, host: str, port: int):
+cdef class Sender:
+    cdef str _host
+    cdef int _port
+    cdef object _sock
+    cdef double _backoff
+    cdef dict _system_info
+
+    def __init__(self, str host, int port):
         self._host = host
         self._port = port
-        self._sock: socket.socket | None = None
+        self._sock = None
         self._backoff = 1.0
         self._system_info = collect_system_info()
 
-    def _connect(self) -> bool:
+    cdef bint _connect(self):
+        cdef object s
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(WIRE_TIMEOUT)
@@ -300,11 +339,11 @@ class Sender:
             self._backoff = min(self._backoff * 2, WIRE_REC_MAX)
             return False
 
-    def connect(self):
+    cdef void connect(self):
         while not self._connect():
             pass
 
-    def send_batch(self, events: list[dict]) -> bool:
+    cdef bint send_batch(self, list events):
         """
         Encode and send a batch of events.  Returns False if the connection
         was lost; caller should reconnect and retry.
@@ -314,7 +353,9 @@ class Sender:
 
         return self._send_objects(events)
 
-    def _send_objects(self, payloads: list[dict]) -> bool:
+    cdef bint _send_objects(self, list payloads):
+        cdef str payload
+        cdef bytes data
         if self._sock is None:
             return False
 
@@ -329,7 +370,7 @@ class Sender:
             self._close()
             return False
 
-    def _close(self):
+    cdef void _close(self):
         if self._sock:
             try:
                 self._sock.close()
@@ -340,14 +381,27 @@ class Sender:
 
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
-def main():
+cpdef main():
+    cdef Sender sender
+    cdef bint lease_announced
+    cdef double poll_interval
+    cdef double next_snapshot_at
+    cdef double now_mono
+    cdef list batch
+    cdef object fh
+    cdef str raw_line
+    cdef object ev
+    cdef dict snapshot
+
     sender = Sender(WIRE_DST, WIRE_PORT)
     sender.connect()
 
+    poll_interval = WIRE_HZ
+
     print(f"[under-seer] polling /proc/all_seer every "
-          f"{WIRE_HZ * 1000:.0f}ms", flush=True)
+        f"{poll_interval * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
-          f"{WIRE_HZ:.2f}s", flush=True)
+        f"{poll_interval:.2f}s", flush=True)
     lease_announced = False
     next_snapshot_at = time.monotonic()
 
@@ -355,7 +409,7 @@ def main():
         # ── Read all available events from the proc file ─────────────────
         # This open/read path is the kernel/userspace handoff. For All-Seer,
         # this process is expected to be the exclusive authorized reader.
-        batch: list[dict] = []
+        batch = []
         try:
             with open(PROC_PATH, "r") as fh:
                 if not lease_announced:
@@ -370,7 +424,7 @@ def main():
                         break
         except PermissionError:
             # Another process owns the proc file; wait and retry.
-            time.sleep(WIRE_HZ)
+            time.sleep(poll_interval)
             continue
         except FileNotFoundError:
             print(f"[under-seer] {PROC_PATH} unavailable — "
@@ -380,7 +434,7 @@ def main():
             continue
         except OSError as exc:
             print(f"[under-seer] read error: {exc}", flush=True)
-            time.sleep(WIRE_HZ)
+            time.sleep(poll_interval)
             continue
 
         # ── Forward events to Over-Seer ───────────────────────────────────
@@ -398,11 +452,10 @@ def main():
                 sender.send_batch([snapshot])
 
             while next_snapshot_at <= now_mono:
-                next_snapshot_at += WIRE_HZ
+                next_snapshot_at += poll_interval
 
-        time.sleep(WIRE_HZ)
+        time.sleep(poll_interval)
 
 
 if __name__ == "__main__":
     main()
-else: raise ImportError("Don't import me!!!")
