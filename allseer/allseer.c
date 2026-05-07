@@ -65,12 +65,6 @@ void as_emit_event(enum as_event_type type, const char *subtype,
   if (!atomic_read(&as_ready) || !atomic_read(&as_collecting))
     return;
 
-#if AS_DEBUG_IGNORE_COMM
-  /* Debug-only name filter from hooks_config.h. */
-  if (strcmp(current->comm, AS_DEBUG_IGNORE_COMM_NAME) == 0)
-    return;
-#endif
-
   ev.timestamp_ns = ktime_get_ns();
   ev.pid = current->pid;
   ev.ppid = task_ppid_nr(current);
