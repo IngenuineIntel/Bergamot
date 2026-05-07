@@ -648,6 +648,40 @@ class EventStore:
             items = list(self.recent_events)
         return items[-limit:]
 
+    def get_overview(self) -> dict | None:
+        with self._lock:
+            if self._db_conn is None:
+                return None
+
+            row = self._db_conn.execute(
+                """
+                SELECT hostname, kernelver, distro, ipaddr, macaddr,
+                       processor, processor_vend, ram_gbs
+                FROM overviewdata
+                LIMIT 1
+                """
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        keys = (
+            "hostname",
+            "kernelver",
+            "distro",
+            "ipaddr",
+            "macaddr",
+            "processor",
+            "processor_vend",
+            "ram_gbs",
+        )
+        data = dict(zip(keys, row))
+        return {
+            key: value
+            for key, value in data.items()
+            if value not in (None, "", 0)
+        }
+
     def get_stats(self) -> dict:
         with self._lock:
             now = time.monotonic()

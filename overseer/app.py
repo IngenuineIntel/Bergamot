@@ -140,6 +140,11 @@ def graph_lifecycle():
     return render_template("graph/lifecycle.html")
 
 
+@app.route("/graph/overview")
+def graph_overview():
+    return render_template("graph/overview.html")
+
+
 @app.route("/graph/dead-processes")
 def graph_dead_processes():
     return render_template("graph/dead_processes.html")
@@ -242,6 +247,15 @@ def api_fork_exec():
 def api_lifecycle():
     """Return live process lifecycle rows."""
     return jsonify(store.get_lifecycle(300))
+
+
+@app.route("/api/overview")
+def api_overview():
+    """Return persisted system overview metadata for the current session."""
+    overview = store.get_overview()
+    if overview is None:
+        return jsonify({"error": "overview unavailable"}), 404
+    return jsonify(overview)
 
 
 @app.route("/api/dead-processes")

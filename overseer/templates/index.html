@@ -15,9 +15,13 @@
     </div>
   </header>
 
-  <main class="live-main">
+  <div class="overview" aria-live="polite">
+    <!-- TODO -->
+  </div>
+
+  <div class="lifecycle">
     <details class="iframe-dropdown iframe-dropdown-group" open>
-      <summary>Process Views</summary>
+      <summary>Process Lifecycle</summary>
       <div class="iframe-dropdown-grid">
         <iframe
           class="graph-frame graph-frame-feed"
@@ -36,7 +40,7 @@
         ></iframe>
       </div>
     </details>
-  </main>
+  </div>
 
   <script src="/static/iframe_resize_parent.js"></script>
   <script src="/static/app.js"></script>

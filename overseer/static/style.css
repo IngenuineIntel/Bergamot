@@ -80,13 +80,17 @@ main {
   min-height: 0;
 }
 
-.live-main {
+.lifecycle {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   padding: 16px 24px;
   align-items: stretch;
   overflow: hidden;
+}
+
+.overview.has-content {
+  padding: 16px 24px 0;
 }
 
 .card {
@@ -193,6 +197,10 @@ main {
   min-height: 420px;
 }
 
+.graph-frame-overview {
+  min-height: 168px;
+}
+
 .graph-frame-feed {
   min-height: 340px;
 }
@@ -260,6 +268,26 @@ body.iframe-page main {
 
 body.iframe-page .card.full-width {
   width: 100%;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+}
+
+.overview-grid__label {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.overview-grid__value {
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Table ── */
@@ -457,6 +485,10 @@ body.is-resizing-cols {
     min-height: 360px;
   }
 
+  .graph-frame-overview {
+    min-height: 152px;
+  }
+
   .graph-frame-feed {
     min-height: 320px;
   }
@@ -478,6 +510,11 @@ body.is-resizing-cols {
 
   .process-hover-details__value {
     font-size: 13px;
+  }
+
+  .overview-grid {
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 6px 10px;
   }
 
   .table-toolbar {

@@ -22,6 +22,8 @@ const COLUMN_WIDTHS_KEY_PREFIX = "bergamot:column-widths:";
 const MIN_COLUMN_WIDTH_PX = 64;
 
 const ui = {
+  overviewMount: document.querySelector(".overview"),
+  overviewGrid: document.getElementById("overview-grid"),
   statEps: document.getElementById("stat-eps"),
   statAgents: document.getElementById("stat-agents"),
   statUptime: document.getElementById("stat-uptime"),
@@ -41,6 +43,8 @@ const ui = {
   deadProcessesPageInfo: document.getElementById("dead-processes-page-info"),
 };
 
+const hasOverviewMount = Boolean(ui.overviewMount);
+const hasOverviewGrid = Boolean(ui.overviewGrid);
 const hasStats = Boolean(ui.statEps || ui.statAgents || ui.statUptime);
 const hasEps = Boolean(ui.epsCanvas && typeof window.Chart !== "undefined");
 const hasProcTable = Boolean(ui.procBody);
@@ -54,6 +58,7 @@ const hasDeadProcessesFeed = Boolean(ui.deadProcessesBody);
 
 let lifecycleRefreshTimer = null;
 let deadProcessesRefreshTimer = null;
+let overviewRetryTimer = null;
 
 const deadPaging = {
   page: 0,
@@ -148,6 +153,106 @@ function applyStats(stats) {
   if (ui.statAgents) ui.statAgents.textContent = String(stats.agent_count ?? 0);
   if (ui.statUptime) ui.statUptime.textContent = fmtUptime(Number(stats.uptime_s || 0));
   if (hasEps) pushEps(eps);
+}
+
+function formatOverviewValue(key, value) {
+  if (key === "ram_gbs") {
+    return `${value} GB`;
+  }
+  return String(value ?? "");
+}
+
+function getOverviewEntries(overview) {
+  const fieldOrder = [
+    ["hostname", "Hostname"],
+    ["kernelver", "Kernel"],
+    ["distro", "Distro"],
+    ["ipaddr", "IP Address"],
+    ["macaddr", "MAC Address"],
+    ["processor", "Processor"],
+    ["processor_vend", "Processor Vendor"],
+    ["ram_gbs", "RAM"],
+  ];
+
+  return fieldOrder
+    .map(([key, label]) => [label, key, overview?.[key]])
+    .filter(([, , value]) => value !== undefined && value !== null && value !== "" && value !== 0);
+}
+
+async function fetchOverviewData() {
+  const response = await fetch("/api/overview");
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Overview request failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+function renderOverviewGrid(overview) {
+  if (!ui.overviewGrid) return;
+
+  const entries = getOverviewEntries(overview);
+  const fragment = document.createDocumentFragment();
+
+  entries.forEach(([label, key, value]) => {
+    const labelEl = document.createElement("div");
+    labelEl.className = "overview-grid__label";
+    labelEl.textContent = label;
+
+    const valueEl = document.createElement("div");
+    valueEl.className = "overview-grid__value";
+    valueEl.textContent = formatOverviewValue(key, value);
+
+    fragment.appendChild(labelEl);
+    fragment.appendChild(valueEl);
+  });
+
+  ui.overviewGrid.replaceChildren(fragment);
+}
+
+function ensureOverviewFrameMounted() {
+  if (!ui.overviewMount) return;
+  if (ui.overviewMount.querySelector("iframe[data-graph-frame]")) return;
+
+  const frame = document.createElement("iframe");
+  frame.className = "graph-frame graph-frame-overview";
+  frame.setAttribute("data-graph-frame", "");
+  frame.src = "/graph/overview";
+  frame.title = "System Overview";
+  frame.loading = "lazy";
+
+  ui.overviewMount.replaceChildren(frame);
+  ui.overviewMount.classList.add("has-content");
+}
+
+function scheduleOverviewRetry() {
+  if ((!hasOverviewMount && !hasOverviewGrid) || overviewRetryTimer) return;
+
+  overviewRetryTimer = window.setTimeout(() => {
+    overviewRetryTimer = null;
+    initOverview().catch(() => {});
+  }, 3000);
+}
+
+async function initOverview() {
+  if (!hasOverviewMount && !hasOverviewGrid) return;
+
+  const overview = await fetchOverviewData();
+  if (!overview) {
+    scheduleOverviewRetry();
+    return;
+  }
+
+  if (hasOverviewMount) {
+    ensureOverviewFrameMounted();
+  }
+  if (hasOverviewGrid) {
+    renderOverviewGrid(overview);
+    const card = ui.overviewGrid.closest(".card");
+    if (card) card.style.display = "";
+  }
 }
 
 // --- Process table -----------------------------------------------------------
@@ -966,6 +1071,10 @@ function initResizableTables() {
 
 initResizableTables();
 initDeadProcessesControls();
+initOverview().catch((err) => {
+  console.warn("Overview bootstrap failed:", err);
+  scheduleOverviewRetry();
+});
 
 window.addEventListener("resize", () => {
   scheduleProcessPanelPositionUpdate();
