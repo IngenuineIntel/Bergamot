@@ -285,7 +285,9 @@ class EventStore:
             ts_ms = rem_ns // 1_000_000
 
         ev_type = str(ev.get("type", "") or "")
-        subtype = str(ev.get("subtype", "none") or "none")
+        subtype = str(ev.get("subtype", "") or "")
+        if subtype == "none":
+            subtype = ""
         comm = str(ev.get("comm", "") or "")
         arg1 = str(ev.get("arg1", ev.get("arg", "")) or "")
         arg2 = str(ev.get("arg2", "") or "")
@@ -363,7 +365,7 @@ class EventStore:
             "ppid": int(ev.get("ppid", 0) or 0),
             "uid": int(ev.get("uid", 0) or 0),
             "type": str(ev.get("type", "") or ""),
-            "subtype": str(ev.get("subtype", "none") or "none"),
+            "subtype": str(ev.get("subtype", "") or ""),
             "comm": str(ev.get("comm", "") or ""),
             "arg1": str(ev.get("arg1", ev.get("arg", "")) or ""),
             "arg2": str(ev.get("arg2", "") or ""),

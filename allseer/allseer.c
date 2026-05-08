@@ -130,11 +130,25 @@ static DEFINE_SPINLOCK(as_fifo_lock);
 atomic_t as_ready = ATOMIC_INIT(0);
 atomic_t as_collecting = ATOMIC_INIT(1);
 
+static bool as_type_has_multiple_subtypes(enum as_event_type type) {
+  switch (type) {
+  case AS_TYPE_EXECVE:
+  case AS_TYPE_SETUID:
+  case AS_TYPE_SETGID:
+  case AS_TYPE_SETREUID:
+  case AS_TYPE_GETID:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /* as_emit_event — called from hooks.c */
 void as_emit_event(enum as_event_type type, const char *subtype,
                    const char *arg) {
   struct as_event ev;
   unsigned long flags;
+  const char *effective_subtype;
 
   /* Drop events until module init completes and collection is active. */
   if (!atomic_read(&as_ready) || !atomic_read(&as_collecting))
@@ -145,7 +159,14 @@ void as_emit_event(enum as_event_type type, const char *subtype,
   ev.ppid = task_ppid_nr(current);
   ev.uid = from_kuid_munged(&init_user_ns, current_uid());
   ev.type = type;
-  strncpy(ev.subtype, subtype ? subtype : "none", sizeof(ev.subtype) - 1);
+
+    /*
+     * Only multi-subtype event types carry subtype labels.
+     * All other types intentionally emit with no subtype.
+     */
+    effective_subtype = as_type_has_multiple_subtypes(type) ? subtype : NULL;
+    strncpy(ev.subtype, effective_subtype ? effective_subtype : "none",
+      sizeof(ev.subtype) - 1);
   ev.subtype[sizeof(ev.subtype) - 1] = '\0';
   get_task_comm(ev.comm, current);
   strncpy(ev.arg, arg ? arg : "", sizeof(ev.arg) - 1);

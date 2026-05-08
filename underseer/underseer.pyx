@@ -232,6 +232,8 @@ def parse_line(line: str) -> dict | None:
     uid_raw = parts[3]
     type_raw = parts[4]
     subtype_raw = parts[5]
+    if subtype_raw == "none":
+        subtype_raw = ""
     comm = parts[6]
     arg = parts[7]
 
