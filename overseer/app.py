@@ -207,6 +207,26 @@ def api_events():
     return jsonify(store.get_recent_events(200))
 
 
+@app.route("/api/events/db")
+def api_events_db():
+    """Return persisted events from SQLite with optional type/subtype filters."""
+    raw_limit = request.args.get("limit", default=200, type=int)
+    raw_offset = request.args.get("offset", default=0, type=int)
+    ev_type = request.args.get("type", default=None, type=str)
+    subtype = request.args.get("subtype", default=None, type=str)
+
+    limit = max(1, min(raw_limit, 5000))
+    offset = max(0, raw_offset)
+
+    rows = store.get_persisted_events(
+        limit=limit,
+        offset=offset,
+        ev_type=(ev_type or "").strip() or None,
+        subtype=(subtype or "").strip() or None,
+    )
+    return jsonify(rows)
+
+
 @app.route("/api/processes")
 def api_processes():
     """Return the current process table snapshot."""

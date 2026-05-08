@@ -109,6 +109,23 @@ int as_probe_x64_sys_capset(struct kprobe *p, struct pt_regs *regs);
 int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs);
 #endif
 
+#if AS_HOOK_GETUID_FAMILY
+int as_probe_x64_sys_getuid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_geteuid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getgid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getegid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getresuid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getresgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_GETPID_FAMILY
+int as_probe_x64_sys_getpid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getppid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_gettid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getpgid(struct kprobe *p, struct pt_regs *regs);
+int as_probe_x64_sys_getsid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
 #if AS_HOOK_OPEN || AS_HOOK_UNLINK || AS_HOOK_RENAME
 static int as_copy_user_str(const char __user *uptr, char *dst, size_t dst_sz) {
   long ret;
@@ -575,6 +592,120 @@ int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs) {
   return 0;
 }
 #endif /* AS_HOOK_KEYCTL */
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: get*id (user/group identity family)
+ * Captures call intent only. Subtype identifies exact syscall.
+ * ═════════════════════════════════════════════════════════════════════════ */
+#if AS_HOOK_GETUID_FAMILY
+int as_probe_x64_sys_getuid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getuid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_geteuid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_geteuid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_getgid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getgid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_getegid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getegid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_getresuid(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  char arg[96];
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  snprintf(arg, sizeof(arg), "ruid_ptr=0x%lx euid_ptr=0x%lx suid_ptr=0x%lx",
+           (unsigned long)sys_regs->di, (unsigned long)sys_regs->si,
+           (unsigned long)sys_regs->dx);
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getresuid", arg);
+  return 0;
+}
+
+int as_probe_x64_sys_getresgid(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  char arg[96];
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  snprintf(arg, sizeof(arg), "rgid_ptr=0x%lx egid_ptr=0x%lx sgid_ptr=0x%lx",
+           (unsigned long)sys_regs->di, (unsigned long)sys_regs->si,
+           (unsigned long)sys_regs->dx);
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getresgid", arg);
+  return 0;
+}
+#endif /* AS_HOOK_GETUID_FAMILY */
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: get*id (process/session family)
+ * Captures call intent only. Subtype identifies exact syscall.
+ * ═════════════════════════════════════════════════════════════════════════ */
+#if AS_HOOK_GETPID_FAMILY
+int as_probe_x64_sys_getpid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getpid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_getppid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getppid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_gettid(struct kprobe *p, struct pt_regs *regs) {
+  AS_HOOK_GUARD();
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_gettid", "call=none");
+  return 0;
+}
+
+int as_probe_x64_sys_getpgid(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  char arg[48];
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  snprintf(arg, sizeof(arg), "pid=%ld", (long)sys_regs->di);
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getpgid", arg);
+  return 0;
+}
+
+int as_probe_x64_sys_getsid(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  char arg[48];
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  snprintf(arg, sizeof(arg), "pid=%ld", (long)sys_regs->di);
+  as_emit_event(AS_TYPE_GETID, "__x64_sys_getsid", arg);
+  return 0;
+}
+#endif /* AS_HOOK_GETPID_FAMILY */
 
 /* ════════════════════════════════════════════════════════════════════════════
  * HOOK: execve / execveat

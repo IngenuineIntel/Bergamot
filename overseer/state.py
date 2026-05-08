@@ -678,6 +678,65 @@ class EventStore:
             items = list(self.recent_events)
         return items[-limit:]
 
+    def get_persisted_events(self, limit: int = 200, offset: int = 0,
+                             ev_type: str | None = None,
+                             subtype: str | None = None) -> list[dict]:
+        with self._lock:
+            if self._db_conn is None:
+                return []
+
+            if limit <= 0:
+                return []
+
+            if offset < 0:
+                offset = 0
+
+            # Flush any batched writes so recently ingested events are visible.
+            self._flush_commits_locked(force=True)
+
+            where = []
+            params: list[object] = []
+
+            if ev_type:
+                where.append("type = ?")
+                params.append(ev_type)
+            if subtype:
+                where.append("subtype = ?")
+                params.append(subtype)
+
+            where_clause = ""
+            if where:
+                where_clause = " WHERE " + " AND ".join(where)
+
+            sql = (
+                "SELECT id, ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2 "
+                "FROM events"
+                f"{where_clause} "
+                "ORDER BY id DESC "
+                "LIMIT ? OFFSET ?"
+            )
+            params.extend([limit, offset])
+            rows = self._db_conn.execute(sql, params).fetchall()
+
+        out = []
+        for row in rows:
+            out.append({
+                "id": row[0],
+                "ts_s": row[1],
+                "ts_ms": row[2],
+                "pid": row[3],
+                "ppid": row[4],
+                "uid": row[5],
+                "type": row[6],
+                "subtype": row[7],
+                "comm": row[8],
+                "arg1": row[9] or "",
+                "arg2": row[10] or "",
+                # Legacy compatibility for existing readers expecting one arg.
+                "arg": row[9] or "",
+            })
+        return out
+
     def get_overview(self) -> dict | None:
         with self._lock:
             if self._db_conn is None:

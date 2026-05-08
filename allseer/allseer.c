@@ -36,6 +36,81 @@
 #include "allseer.h"
 #include "switches.h"
 
+/*
+ * Per-kernel symbol availability flags.
+ * Override at build time (for example via EXTRA_CFLAGS -DAS_SYM_...=0)
+ * without editing switches.h.
+ */
+#ifndef AS_SYM_X64_SYS_ACCEPT4
+#define AS_SYM_X64_SYS_ACCEPT4 1
+#endif
+#ifndef AS_SYM_X64_SYS_UNLINKAT
+#define AS_SYM_X64_SYS_UNLINKAT 1
+#endif
+#ifndef AS_SYM_X64_SYS_RENAMEAT2
+#define AS_SYM_X64_SYS_RENAMEAT2 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETUID
+#define AS_SYM_X64_SYS_SETUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETRESUID
+#define AS_SYM_X64_SYS_SETRESUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETGID
+#define AS_SYM_X64_SYS_SETGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETRESGID
+#define AS_SYM_X64_SYS_SETRESGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETEGID
+#define AS_SYM_X64_SYS_SETEGID 0
+#endif
+#ifndef AS_SYM_X64_SYS_SETREUID
+#define AS_SYM_X64_SYS_SETREUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_SETEUID
+#define AS_SYM_X64_SYS_SETEUID 0
+#endif
+#ifndef AS_SYM_X64_SYS_CAPSET
+#define AS_SYM_X64_SYS_CAPSET 1
+#endif
+#ifndef AS_SYM_X64_SYS_KEYCTL
+#define AS_SYM_X64_SYS_KEYCTL 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETUID
+#define AS_SYM_X64_SYS_GETUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETEUID
+#define AS_SYM_X64_SYS_GETEUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETGID
+#define AS_SYM_X64_SYS_GETGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETEGID
+#define AS_SYM_X64_SYS_GETEGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETRESUID
+#define AS_SYM_X64_SYS_GETRESUID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETRESGID
+#define AS_SYM_X64_SYS_GETRESGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETPID
+#define AS_SYM_X64_SYS_GETPID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETPPID
+#define AS_SYM_X64_SYS_GETPPID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETTID
+#define AS_SYM_X64_SYS_GETTID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETPGID
+#define AS_SYM_X64_SYS_GETPGID 1
+#endif
+#ifndef AS_SYM_X64_SYS_GETSID
+#define AS_SYM_X64_SYS_GETSID 1
+#endif
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IgenuineIntel");
 MODULE_DESCRIPTION("System Event Analytics");
@@ -205,10 +280,11 @@ static const char *const as_type_str[] = {
     [AS_TYPE_UNLINK] = "unlink",
     [AS_TYPE_RENAME] = "rename",
     [AS_TYPE_SETUID] = "setuid",
-  [AS_TYPE_SETGID] = "setgid",
-  [AS_TYPE_SETREUID] = "setreuid",
-  [AS_TYPE_CAPSET] = "capset",
-  [AS_TYPE_KEYCTL] = "keyctl",
+    [AS_TYPE_SETGID] = "setgid",
+    [AS_TYPE_SETREUID] = "setreuid",
+    [AS_TYPE_CAPSET] = "capset",
+    [AS_TYPE_KEYCTL] = "keyctl",
+    [AS_TYPE_GETID] = "getid",
 };
 
 /*
@@ -318,40 +394,83 @@ extern int as_probe_clone(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_connect(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_ACCEPT
+#if AS_HOOK_ACCEPT && AS_SYM_X64_SYS_ACCEPT4
 extern int as_probe_x64_sys_accept4(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_UNLINK
+#if AS_HOOK_UNLINK && AS_SYM_X64_SYS_UNLINKAT
 extern int as_probe_x64_sys_unlinkat(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_RENAME
+#if AS_HOOK_RENAME && AS_SYM_X64_SYS_RENAMEAT2
 extern int as_probe_x64_sys_renameat2(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_SETUID
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETUID
 extern int as_probe_x64_sys_setuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETRESUID
 extern int as_probe_x64_sys_setresuid(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_SETGID
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETGID
 extern int as_probe_x64_sys_setgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETRESGID
 extern int as_probe_x64_sys_setresgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETEGID
 extern int as_probe_x64_sys_setegid(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_SETREUID
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETREUID
 extern int as_probe_x64_sys_setreuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETEUID
 extern int as_probe_x64_sys_seteuid(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_CAPSET
+#if AS_HOOK_CAPSET && AS_SYM_X64_SYS_CAPSET
 extern int as_probe_x64_sys_capset(struct kprobe *p, struct pt_regs *regs);
 #endif
 
-#if AS_HOOK_KEYCTL
+#if AS_HOOK_KEYCTL && AS_SYM_X64_SYS_KEYCTL
 extern int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETUID
+extern int as_probe_x64_sys_getuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEUID
+extern int as_probe_x64_sys_geteuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETGID
+extern int as_probe_x64_sys_getgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEGID
+extern int as_probe_x64_sys_getegid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESUID
+extern int as_probe_x64_sys_getresuid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESGID
+extern int as_probe_x64_sys_getresgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPID
+extern int as_probe_x64_sys_getpid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPPID
+extern int as_probe_x64_sys_getppid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETTID
+extern int as_probe_x64_sys_gettid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPGID
+extern int as_probe_x64_sys_getpgid(struct kprobe *p, struct pt_regs *regs);
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETSID
+extern int as_probe_x64_sys_getsid(struct kprobe *p, struct pt_regs *regs);
 #endif
 
 #if AS_HOOK_EXECVE
@@ -384,68 +503,142 @@ static struct kprobe as_kprobes[] = {
         .pre_handler = as_probe_connect,
     },
 #endif
-#if AS_HOOK_ACCEPT
+#if AS_HOOK_ACCEPT && AS_SYM_X64_SYS_ACCEPT4
   {
     .symbol_name = "__x64_sys_accept4",
     .pre_handler = as_probe_x64_sys_accept4,
   },
 #endif
-#if AS_HOOK_UNLINK
+#if AS_HOOK_UNLINK && AS_SYM_X64_SYS_UNLINKAT
   {
     .symbol_name = "__x64_sys_unlinkat",
     .pre_handler = as_probe_x64_sys_unlinkat,
   },
 #endif
-#if AS_HOOK_RENAME
+#if AS_HOOK_RENAME && AS_SYM_X64_SYS_RENAMEAT2
   {
     .symbol_name = "__x64_sys_renameat2",
     .pre_handler = as_probe_x64_sys_renameat2,
   },
 #endif
-#if AS_HOOK_SETUID
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETUID
   {
     .symbol_name = "__x64_sys_setuid",
     .pre_handler = as_probe_x64_sys_setuid,
   },
+#endif
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETRESUID
   {
     .symbol_name = "__x64_sys_setresuid",
     .pre_handler = as_probe_x64_sys_setresuid,
   },
 #endif
-#if AS_HOOK_SETGID
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETGID
   {
     .symbol_name = "__x64_sys_setgid",
     .pre_handler = as_probe_x64_sys_setgid,
   },
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETRESGID
   {
     .symbol_name = "__x64_sys_setresgid",
     .pre_handler = as_probe_x64_sys_setresgid,
   },
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETEGID
   {
     .symbol_name = "__x64_sys_setegid",
     .pre_handler = as_probe_x64_sys_setegid,
   },
 #endif
-#if AS_HOOK_SETREUID
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETREUID
   {
     .symbol_name = "__x64_sys_setreuid",
     .pre_handler = as_probe_x64_sys_setreuid,
   },
+#endif
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETEUID
   {
     .symbol_name = "__x64_sys_seteuid",
     .pre_handler = as_probe_x64_sys_seteuid,
   },
 #endif
-#if AS_HOOK_CAPSET
+#if AS_HOOK_CAPSET && AS_SYM_X64_SYS_CAPSET
   {
     .symbol_name = "__x64_sys_capset",
     .pre_handler = as_probe_x64_sys_capset,
   },
 #endif
-#if AS_HOOK_KEYCTL
+#if AS_HOOK_KEYCTL && AS_SYM_X64_SYS_KEYCTL
   {
     .symbol_name = "__x64_sys_keyctl",
     .pre_handler = as_probe_x64_sys_keyctl,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETUID
+  {
+    .symbol_name = "__x64_sys_getuid",
+    .pre_handler = as_probe_x64_sys_getuid,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEUID
+  {
+    .symbol_name = "__x64_sys_geteuid",
+    .pre_handler = as_probe_x64_sys_geteuid,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETGID
+  {
+    .symbol_name = "__x64_sys_getgid",
+    .pre_handler = as_probe_x64_sys_getgid,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEGID
+  {
+    .symbol_name = "__x64_sys_getegid",
+    .pre_handler = as_probe_x64_sys_getegid,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESUID
+  {
+    .symbol_name = "__x64_sys_getresuid",
+    .pre_handler = as_probe_x64_sys_getresuid,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESGID
+  {
+    .symbol_name = "__x64_sys_getresgid",
+    .pre_handler = as_probe_x64_sys_getresgid,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPID
+  {
+    .symbol_name = "__x64_sys_getpid",
+    .pre_handler = as_probe_x64_sys_getpid,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPPID
+  {
+    .symbol_name = "__x64_sys_getppid",
+    .pre_handler = as_probe_x64_sys_getppid,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETTID
+  {
+    .symbol_name = "__x64_sys_gettid",
+    .pre_handler = as_probe_x64_sys_gettid,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPGID
+  {
+    .symbol_name = "__x64_sys_getpgid",
+    .pre_handler = as_probe_x64_sys_getpgid,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETSID
+  {
+    .symbol_name = "__x64_sys_getsid",
+    .pre_handler = as_probe_x64_sys_getsid,
   },
 #endif
 };
