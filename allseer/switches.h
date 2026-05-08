@@ -18,6 +18,7 @@
 #define AS_HOOK_SETREUID 1
 #define AS_HOOK_CAPSET 1
 #define AS_HOOK_KEYCTL 1
+#define AS_HOOK_PTRACE 1
 #define AS_HOOK_GETUID_FAMILY 1
 #define AS_HOOK_GETPID_FAMILY 0 // particularly noisy
 

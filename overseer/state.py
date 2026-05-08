@@ -290,7 +290,14 @@ class EventStore:
             subtype = ""
         comm = str(ev.get("comm", "") or "")
         arg1 = str(ev.get("arg1", ev.get("arg", "")) or "")
-        arg2 = str(ev.get("arg2", "") or "")
+        arg2_raw = ev.get("arg2", "")
+        if ev_type == "ptrace":
+            try:
+                arg2 = int(arg2_raw)
+            except (TypeError, ValueError):
+                arg2 = str(arg2_raw or "")
+        else:
+            arg2 = str(arg2_raw or "")
 
         normalized = {
             "ts_s": ts_s,
@@ -368,7 +375,8 @@ class EventStore:
             "subtype": str(ev.get("subtype", "") or ""),
             "comm": str(ev.get("comm", "") or ""),
             "arg1": str(ev.get("arg1", ev.get("arg", "")) or ""),
-            "arg2": str(ev.get("arg2", "") or ""),
+            "arg2": ev.get("arg2", "") if isinstance(ev.get("arg2", ""), int)
+            else str(ev.get("arg2", "") or ""),
         }
 
         try:

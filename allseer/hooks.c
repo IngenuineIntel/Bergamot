@@ -34,6 +34,7 @@
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
 #include <linux/net.h>
+#include <linux/ptrace.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <net/sock.h>
@@ -107,6 +108,10 @@ int as_probe_x64_sys_capset(struct kprobe *p, struct pt_regs *regs);
 
 #if AS_HOOK_KEYCTL
 int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs);
+#endif
+
+#if AS_HOOK_PTRACE
+int as_probe_x64_sys_ptrace(struct kprobe *p, struct pt_regs *regs);
 #endif
 
 #if AS_HOOK_GETUID_FAMILY
@@ -592,6 +597,120 @@ int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs) {
   return 0;
 }
 #endif /* AS_HOOK_KEYCTL */
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * HOOK: ptrace
+ * Captures ptrace request and tracee pid.
+ *
+ * __x64_sys_ptrace argument layout:
+ *   rdi = struct pt_regs *sys_regs
+ *   sys_regs->di = long request
+ *   sys_regs->si = long pid (tracee)
+ * ═════════════════════════════════════════════════════════════════════════ */
+#if AS_HOOK_PTRACE
+static const char *as_ptrace_request_name(long request) {
+  switch (request) {
+  case PTRACE_TRACEME:
+    return "PTRACE_TRACEME";
+  case PTRACE_PEEKTEXT:
+    return "PTRACE_PEEKTEXT";
+  case PTRACE_PEEKDATA:
+    return "PTRACE_PEEKDATA";
+  case PTRACE_PEEKUSR:
+    return "PTRACE_PEEKUSR";
+  case PTRACE_POKETEXT:
+    return "PTRACE_POKETEXT";
+  case PTRACE_POKEDATA:
+    return "PTRACE_POKEDATA";
+  case PTRACE_POKEUSR:
+    return "PTRACE_POKEUSR";
+  case PTRACE_CONT:
+    return "PTRACE_CONT";
+  case PTRACE_KILL:
+    return "PTRACE_KILL";
+  case PTRACE_SINGLESTEP:
+    return "PTRACE_SINGLESTEP";
+  case PTRACE_GETREGS:
+    return "PTRACE_GETREGS";
+  case PTRACE_SETREGS:
+    return "PTRACE_SETREGS";
+  case PTRACE_GETFPREGS:
+    return "PTRACE_GETFPREGS";
+  case PTRACE_SETFPREGS:
+    return "PTRACE_SETFPREGS";
+  case PTRACE_ATTACH:
+    return "PTRACE_ATTACH";
+  case PTRACE_DETACH:
+    return "PTRACE_DETACH";
+  case PTRACE_GETFPXREGS:
+    return "PTRACE_GETFPXREGS";
+  case PTRACE_SETFPXREGS:
+    return "PTRACE_SETFPXREGS";
+  case PTRACE_SYSCALL:
+    return "PTRACE_SYSCALL";
+  case PTRACE_SETOPTIONS:
+    return "PTRACE_SETOPTIONS";
+  case PTRACE_GETEVENTMSG:
+    return "PTRACE_GETEVENTMSG";
+  case PTRACE_GETSIGINFO:
+    return "PTRACE_GETSIGINFO";
+  case PTRACE_SETSIGINFO:
+    return "PTRACE_SETSIGINFO";
+  case PTRACE_GETREGSET:
+    return "PTRACE_GETREGSET";
+  case PTRACE_SETREGSET:
+    return "PTRACE_SETREGSET";
+  case PTRACE_SEIZE:
+    return "PTRACE_SEIZE";
+  case PTRACE_INTERRUPT:
+    return "PTRACE_INTERRUPT";
+  case PTRACE_LISTEN:
+    return "PTRACE_LISTEN";
+  case PTRACE_PEEKSIGINFO:
+    return "PTRACE_PEEKSIGINFO";
+  case PTRACE_GETSIGMASK:
+    return "PTRACE_GETSIGMASK";
+  case PTRACE_SETSIGMASK:
+    return "PTRACE_SETSIGMASK";
+  case PTRACE_SECCOMP_GET_FILTER:
+    return "PTRACE_SECCOMP_GET_FILTER";
+  case PTRACE_SECCOMP_GET_METADATA:
+    return "PTRACE_SECCOMP_GET_METADATA";
+  case PTRACE_GET_SYSCALL_INFO:
+    return "PTRACE_GET_SYSCALL_INFO";
+  default:
+    return NULL;
+  }
+}
+
+int as_probe_x64_sys_ptrace(struct kprobe *p, struct pt_regs *regs) {
+  const struct pt_regs *sys_regs = (const struct pt_regs *)regs->di;
+  long request;
+  long tracee_pid;
+  const char *request_name;
+  char arg1[64];
+  char arg2[32];
+
+  AS_HOOK_GUARD();
+
+  if (!sys_regs)
+    return 0;
+
+  request = (long)sys_regs->di;
+  tracee_pid = (long)sys_regs->si;
+  request_name = as_ptrace_request_name(request);
+
+  if (request_name)
+    scnprintf(arg1, sizeof(arg1), "%s", request_name);
+  else
+    scnprintf(arg1, sizeof(arg1), "PTRACE_UNKNOWN(%ld)", request);
+
+  scnprintf(arg2, sizeof(arg2), "%ld", tracee_pid);
+
+  as_emit_event2(AS_TYPE_PTRACE, "__x64_sys_ptrace", arg1, arg2);
+  return 0;
+}
+#endif /* AS_HOOK_PTRACE */
 
 /* ════════════════════════════════════════════════════════════════════════════
  * HOOK: get*id (user/group identity family)

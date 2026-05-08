@@ -40,6 +40,7 @@ enum as_event_type {
   AS_TYPE_SETREUID,
   AS_TYPE_CAPSET,
   AS_TYPE_KEYCTL,
+  AS_TYPE_PTRACE,
   AS_TYPE_GETID,
 };
 

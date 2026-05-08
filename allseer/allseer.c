@@ -77,6 +77,9 @@
 #ifndef AS_SYM_X64_SYS_KEYCTL
 #define AS_SYM_X64_SYS_KEYCTL 1
 #endif
+#ifndef AS_SYM_X64_SYS_PTRACE
+#define AS_SYM_X64_SYS_PTRACE 1
+#endif
 #ifndef AS_SYM_X64_SYS_GETUID
 #define AS_SYM_X64_SYS_GETUID 1
 #endif
@@ -313,6 +316,7 @@ static const char *const as_type_str[] = {
     [AS_TYPE_SETREUID] = "setreuid",
     [AS_TYPE_CAPSET] = "capset",
     [AS_TYPE_KEYCTL] = "keyctl",
+    [AS_TYPE_PTRACE] = "ptrace",
     [AS_TYPE_GETID] = "getid",
 };
 
@@ -467,6 +471,10 @@ extern int as_probe_x64_sys_capset(struct kprobe *p, struct pt_regs *regs);
 extern int as_probe_x64_sys_keyctl(struct kprobe *p, struct pt_regs *regs);
 #endif
 
+#if AS_HOOK_PTRACE && AS_SYM_X64_SYS_PTRACE
+extern int as_probe_x64_sys_ptrace(struct kprobe *p, struct pt_regs *regs);
+#endif
+
 #if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETUID
 extern int as_probe_x64_sys_getuid(struct kprobe *p, struct pt_regs *regs);
 #endif
@@ -602,6 +610,12 @@ static struct kprobe as_kprobes[] = {
   {
     .symbol_name = "__x64_sys_keyctl",
     .pre_handler = as_probe_x64_sys_keyctl,
+  },
+#endif
+#if AS_HOOK_PTRACE && AS_SYM_X64_SYS_PTRACE
+  {
+    .symbol_name = "__x64_sys_ptrace",
+    .pre_handler = as_probe_x64_sys_ptrace,
   },
 #endif
 #if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETUID

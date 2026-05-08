@@ -219,6 +219,7 @@ def parse_line(line: str) -> dict | None:
     cdef str comm
     cdef str arg1
     cdef str arg2
+    cdef object arg2_value
     cdef str arg_legacy
     cdef long long ts_ns
     cdef long long ts_s
@@ -275,6 +276,14 @@ def parse_line(line: str) -> dict | None:
         ts_ns = int(ts_raw)
         ts_s = ts_ns // 1_000_000_000
         rem_ns = ts_ns % 1_000_000_000
+
+        arg2_value = arg2
+        if type_raw == "ptrace" and arg2:
+            try:
+                arg2_value = int(arg2)
+            except ValueError:
+                arg2_value = arg2
+
         return {
             "ts_s": int(ts_s),
             "ts_ms": int(rem_ns // 1_000_000),
@@ -286,7 +295,7 @@ def parse_line(line: str) -> dict | None:
             "comm": comm,
             "arg": arg1,
             "arg1": arg1,
-            "arg2": arg2,
+            "arg2": arg2_value,
         }
     except ValueError:
         return None
