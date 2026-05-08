@@ -68,7 +68,7 @@ WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
 WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
-WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 0.25)
+WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
@@ -438,7 +438,7 @@ cpdef main():
     sender = Sender(WIRE_DST, WIRE_PORT)
     sender.connect()
 
-    poll_interval = WIRE_HZ
+    poll_interval = 1 / WIRE_HZ
 
     print(f"[under-seer] polling /proc/all_seer every "
         f"{poll_interval * 1000:.0f}ms", flush=True)
