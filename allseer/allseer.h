@@ -5,9 +5,9 @@
  * Interface contract across components:
  *   hooks.c produces struct as_event via as_emit_event().
  *   allseer.c drains struct as_event to procfs line format:
- *     <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>
+ *     <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
  *   underseer.py parses that line into JSON keys:
- *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg
+ *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
  *
  * Field mapping:
  *   timestamp_ns -> ts_s + ts_ms
@@ -17,7 +17,8 @@
  *   type         -> type (stringified in allseer.c)
  *   subtype      -> subtype (future syscall minutia)
  *   comm         -> comm
- *   arg          -> arg
+ *   arg          -> arg / arg1
+ *   arg2         -> arg2
  */
 
 #ifndef ALLSEER_H
@@ -53,10 +54,13 @@ struct as_event {
   char subtype[32];         /* syscall subtype (currently "none") */
   char comm[TASK_COMM_LEN]; /* process name (≤15 chars + NUL)      */
   char arg[256];            /* filename / argv[0] / "IP:port"      */
+  char arg2[256];           /* optional secondary syscall argument  */
 };
 
 /* ── Shared function declared in allseer.c, called from hooks.c ──────── */
 void as_emit_event(enum as_event_type type, const char *subtype,
                    const char *arg);
+void as_emit_event2(enum as_event_type type, const char *subtype,
+                    const char *arg, const char *arg2);
 
 #endif /* ALLSEER_H */

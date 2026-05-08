@@ -144,8 +144,8 @@ static bool as_type_has_multiple_subtypes(enum as_event_type type) {
 }
 
 /* as_emit_event — called from hooks.c */
-void as_emit_event(enum as_event_type type, const char *subtype,
-                   const char *arg) {
+void as_emit_event2(enum as_event_type type, const char *subtype,
+                    const char *arg, const char *arg2) {
   struct as_event ev;
   unsigned long flags;
   const char *effective_subtype;
@@ -171,6 +171,8 @@ void as_emit_event(enum as_event_type type, const char *subtype,
   get_task_comm(ev.comm, current);
   strncpy(ev.arg, arg ? arg : "", sizeof(ev.arg) - 1);
   ev.arg[sizeof(ev.arg) - 1] = '\0';
+  strncpy(ev.arg2, arg2 ? arg2 : "", sizeof(ev.arg2) - 1);
+  ev.arg2[sizeof(ev.arg2) - 1] = '\0';
 
   spin_lock_irqsave(&as_fifo_lock, flags);
   /* If the fifo is full, drop the oldest entry to make room. */
@@ -181,6 +183,12 @@ void as_emit_event(enum as_event_type type, const char *subtype,
   }
   kfifo_put(&as_fifo, ev);
   spin_unlock_irqrestore(&as_fifo_lock, flags);
+}
+EXPORT_SYMBOL(as_emit_event2);
+
+void as_emit_event(enum as_event_type type, const char *subtype,
+                   const char *arg) {
+  as_emit_event2(type, subtype, arg, "");
 }
 EXPORT_SYMBOL(as_emit_event);
 
@@ -341,15 +349,15 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
    * format the kfifo directly into the user buffer. Non-owners get 0
    * bytes, identical to an empty file.
    *
-   * Procfs line contract emitted to Under-Seer:
-  *   <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>\n
+  * Procfs line contract emitted to Under-Seer:
+  *   <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\n
    *
    * Under-Seer maps these fields into JSON keys:
-  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg
+  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
    */
 
   struct as_event ev;
-  char line[384];
+  char line[768];
   ssize_t total = 0;
   unsigned long flags;
 
@@ -366,12 +374,12 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     }
     spin_unlock_irqrestore(&as_fifo_lock, flags);
 
-    len = snprintf(line, sizeof(line), "%llu %d %d %u %s %s %s %s\n",
+    len = snprintf(line, sizeof(line), "%llu\t%d\t%d\t%u\t%s\t%s\t%s\t%s\t%s\n",
                    (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
                    (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
                        ? as_type_str[ev.type]
                        : "unknown",
-             ev.subtype, ev.comm, ev.arg);
+             ev.subtype, ev.comm, ev.arg, ev.arg2);
 
     if (len <= 0)
       continue;

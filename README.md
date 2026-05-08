@@ -34,8 +34,7 @@ All syscall hook families are controlled at compile time in
   `AS_HOOK_RENAME`, `AS_HOOK_SETUID`
 
 Subtype semantics now identify the concrete syscall entrypoint variant (for
-example `__x64_sys_setuid` vs `__x64_sys_setresuid`). Detailed call data is
-encoded in the existing `arg` field so wire compatibility stays unchanged.
+example `__x64_sys_setuid` vs `__x64_sys_setresuid`).
 
 ### Compiling For Testing
 
@@ -77,23 +76,6 @@ settings. Currently, they are as follows:
  reading/sending information, default is 0.25 (Hz)
  - `BERGAMOT_BATCH_MAX`: The maximum amount of syscall entries that can be sent
  via the wire protocol at once
-
-### Wire Protocol
-
-Each Underseer TCP connection must begin with one NDJSON object of the form:
-
-```json
-{"kind":"system_info","hostname":"...","kernelver":"...","distro":"...","ipaddr":"...","macaddr":"...","processor":"...","processor_vend":"...","ram_gbs":16}
-```
-
-Only after that handshake does the Overseer initialize the session database and
-accept syscall events and process snapshots.
-
-The syscall event line contract from `/proc/all_seer` remains unchanged:
-
-`<ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>`
-
-Phase 2 enriched `subtype` and `arg` contents but did not change line shape.
 
 ### Compiling For Use
 

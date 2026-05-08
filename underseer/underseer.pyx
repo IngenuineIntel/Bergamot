@@ -10,7 +10,8 @@ Syscall wire format (one JSON object per line):
     {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
      "ppid": <int>, "uid": <int>,
     "type": "open"|"fork"|"connect"|"execve", "subtype": "<str>",
-    "comm": "<str>", "arg": "<str>"}
+    "comm": "<str>", "arg": "<str>", "arg1": "<str>",
+    "arg2": "<str>"}
 
 Process snapshot wire format (one JSON object per line):
         {"kind": "proc_snapshot", "ts_s": <unix-seconds>, "ts_ms": <0-999>,
@@ -197,12 +198,15 @@ def collect_system_info() -> dict:
 
 def parse_line(line: str) -> dict | None:
     """
-    Parse one space-separated procfs event line.
+        Parse one procfs event line.
 
-    Format:  <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>
+        Preferred format (tab-separated):
+            <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
 
-    The arg field may contain spaces (e.g. command arguments), so we split
-    into at most 8 tokens and treat everything after the 7th token as <arg>.
+        Legacy format (space-separated):
+            <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>
+
+        Legacy parsing keeps backward compatibility for old module builds.
     """
 
     cdef list parts
@@ -213,29 +217,59 @@ def parse_line(line: str) -> dict | None:
     cdef str type_raw
     cdef str subtype_raw
     cdef str comm
-    cdef str arg
+    cdef str arg1
+    cdef str arg2
+    cdef str arg_legacy
     cdef long long ts_ns
     cdef long long ts_s
     cdef long long rem_ns
+    cdef int arg2_pos
 
     line = line.strip()
     if not line:
         return None
 
-    parts = line.split(None, 7)
-    if len(parts) < 8:
-        return None
+    if "\t" in line:
+        parts = line.split("\t", 8)
+        if len(parts) < 9:
+            return None
 
-    ts_raw = parts[0]
-    pid_raw = parts[1]
-    ppid_raw = parts[2]
-    uid_raw = parts[3]
-    type_raw = parts[4]
-    subtype_raw = parts[5]
-    if subtype_raw == "none":
-        subtype_raw = ""
-    comm = parts[6]
-    arg = parts[7]
+        ts_raw = parts[0]
+        pid_raw = parts[1]
+        ppid_raw = parts[2]
+        uid_raw = parts[3]
+        type_raw = parts[4]
+        subtype_raw = parts[5]
+        if subtype_raw == "none":
+            subtype_raw = ""
+        comm = parts[6]
+        arg1 = parts[7]
+        arg2 = parts[8]
+    else:
+        parts = line.split(None, 7)
+        if len(parts) < 8:
+            return None
+
+        ts_raw = parts[0]
+        pid_raw = parts[1]
+        ppid_raw = parts[2]
+        uid_raw = parts[3]
+        type_raw = parts[4]
+        subtype_raw = parts[5]
+        if subtype_raw == "none":
+            subtype_raw = ""
+        comm = parts[6]
+
+        arg_legacy = parts[7]
+        arg1 = arg_legacy
+        arg2 = ""
+
+        # Transitional parsing: if arg was encoded as "arg1=<x> arg2=<y>", split it.
+        if arg_legacy.startswith("arg1="):
+            arg2_pos = arg_legacy.find(" arg2=")
+            if arg2_pos != -1:
+                arg1 = arg_legacy[5:arg2_pos].strip()
+                arg2 = arg_legacy[arg2_pos + 6:].strip()
 
     try:
         ts_ns = int(ts_raw)
@@ -250,7 +284,9 @@ def parse_line(line: str) -> dict | None:
             "type": type_raw,
             "subtype": subtype_raw,
             "comm": comm,
-            "arg": arg,
+            "arg": arg1,
+            "arg1": arg1,
+            "arg2": arg2,
         }
     except ValueError:
         return None
