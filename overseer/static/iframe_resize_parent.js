@@ -1,7 +1,10 @@
 "use strict";
 
 (function () {
-  const MIN_HEIGHT = 180;
+  const DEFAULT_MIN_HEIGHT = 180;
+  const MIN_HEIGHT_BY_PATH = new Map([
+    ["/graph/overview", 0],
+  ]);
   const frameSelector = "iframe[data-graph-frame]";
   const LOCKED_HEIGHT_PATHS = new Set([
     "/graph/lifecycle",
@@ -9,6 +12,10 @@
   ]);
   const reportedHeights = new Map();
   let manualLockedHeight = null;
+
+  function minHeightForPath(path) {
+    return MIN_HEIGHT_BY_PATH.get(path) ?? DEFAULT_MIN_HEIGHT;
+  }
 
   function getLockedFrames() {
     const lifecycleFrame = getFrameByPath("/graph/lifecycle");
@@ -21,7 +28,7 @@
     const frames = getLockedFrames();
     if (!frames) return;
 
-    const syncedHeight = Math.max(MIN_HEIGHT, Math.round(Number(height) || 0));
+    const syncedHeight = Math.max(DEFAULT_MIN_HEIGHT, Math.round(Number(height) || 0));
     frames.forEach((frame) => {
       frame.style.height = `${syncedHeight}px`;
     });
@@ -29,9 +36,9 @@
 
   function autoLockedHeight() {
     return Math.max(
-      MIN_HEIGHT,
-      reportedHeights.get("/graph/lifecycle") || MIN_HEIGHT,
-      reportedHeights.get("/graph/dead-processes") || MIN_HEIGHT,
+      DEFAULT_MIN_HEIGHT,
+      reportedHeights.get("/graph/lifecycle") || DEFAULT_MIN_HEIGHT,
+      reportedHeights.get("/graph/dead-processes") || DEFAULT_MIN_HEIGHT,
     );
   }
 
@@ -64,7 +71,7 @@
 
       const onMouseMove = (moveEvent) => {
         const deltaY = moveEvent.clientY - startY;
-        manualLockedHeight = Math.max(MIN_HEIGHT, startHeight + deltaY);
+        manualLockedHeight = Math.max(DEFAULT_MIN_HEIGHT, startHeight + deltaY);
         applyLockedHeight(manualLockedHeight);
       };
 
@@ -97,7 +104,7 @@
     const data = event.data || {};
     if (data.type !== "graph-height" || typeof data.path !== "string") return;
 
-    const nextHeight = Math.max(MIN_HEIGHT, Number(data.height) || 0);
+    const nextHeight = Math.max(minHeightForPath(data.path), Number(data.height) || 0);
     if (nextHeight <= 0) return;
 
     if (LOCKED_HEIGHT_PATHS.has(data.path)) {

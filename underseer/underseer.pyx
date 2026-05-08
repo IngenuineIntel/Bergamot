@@ -74,11 +74,6 @@ WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
 
-# ── Event type mapping (must match AS_TYPE_* constants in all_seer.h) ────── #
-
-cdef const char *_TYPE_NAMES[4]
-_TYPE_NAMES[:] = ["open", "fork", "connect", "execve"]
-
 
 def _read_first_line(path: str) -> str:
     try:
