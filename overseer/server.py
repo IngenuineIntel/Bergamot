@@ -34,6 +34,8 @@ from state import store
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 9000          # override via environment in app.py if desired
 
+# TODO this should not be allowing multiple agents, but I'm currently working
+# around the framework already built
 
 def _handle_client(conn: socket.socket, addr):
     """One thread per connected Under-Seer agent."""
@@ -104,7 +106,6 @@ def _accept_loop(server_sock: socket.socket):
                              daemon=True, name=f"agent-{addr}")
         t.start()
 
-
 def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
     """Bind the TCP listener and start the accept loop in a daemon thread."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -113,7 +114,10 @@ def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
     server_sock.listen(16)
     print(f"[over-seer] TCP listener on {host}:{port}", flush=True)
 
-    t = threading.Thread(target=_accept_loop, args=(server_sock,),
+    t = threading.Thread(target=store.conn_uptime_thread, args=(),
+                         daemon=False, name="uptime-manager")
+    u = threading.Thread(target=_accept_loop, args=(server_sock,),
                          daemon=True, name="tcp-accept")
     t.start()
+    u.start()
     return server_sock

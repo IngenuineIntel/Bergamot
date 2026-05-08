@@ -43,6 +43,8 @@ class EventStore:
                  rate_window: int = 10):
         self._lock = threading.Lock()
 
+        self.conn_uptime = 0
+
         # Live process table: pid (int) → dict
         self.processes: dict[int, dict] = {}
 
@@ -799,6 +801,18 @@ class EventStore:
             "uptime_s":       uptime,
         }
 
+    def conn_uptime_thread(self):
+        while True:
+            start = time.perf_counter()
+            if self.agent_count > 0:
+                with self._lock:
+                    self.conn_uptime += 1
+            else: self.conn_uptime = 0
+            time.sleep(1 - (start - time.perf_counter()))
+    
+    def get_conn_uptime(self):
+        with self._lock:
+            return self.conn_uptime
 
 # Singleton shared across the whole process
 store = EventStore()

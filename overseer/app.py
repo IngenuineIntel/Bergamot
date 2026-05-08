@@ -300,6 +300,11 @@ def api_stats():
     """Return events/sec, connected agent count, and uptime."""
     return jsonify(store.get_stats())
 
+@app.route("/api/uptime")
+def api_uptime():
+    """Return uptime since oldest living agent connection (*new way*)"""
+    return jsonify({"uptime": store.get_conn_uptime()})
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     def envvar_fetch(name: str, valtype: type, default):

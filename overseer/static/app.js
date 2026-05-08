@@ -25,7 +25,6 @@ const ui = {
   overviewMount: document.querySelector(".overview"),
   overviewGrid: document.getElementById("overview-grid"),
   statEps: document.getElementById("stat-eps"),
-  statAgents: document.getElementById("stat-agents"),
   statUptime: document.getElementById("stat-uptime"),
   epsCanvas: document.getElementById("eps-chart"),
   procTable: document.getElementById("proc-table"),
@@ -106,6 +105,7 @@ function findHostFrameElement() {
 
   return null;
 }
+
 
 function resolveProcessPanelHost() {
   const frameEl = findHostFrameElement();
@@ -199,22 +199,48 @@ function fmtUptime(seconds) {
   return `${h}h ${m}m ${s}s`;
 }
 
-function fmtEventTs(ts_s, ts_ms) {
+function fmtEventTs(ts_s, ts_ms, ms_ct) {
   const date = new Date(ts_s * 1000 + ts_ms);
   return date.toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    fractionalSecondDigits: 3
+    fractionalSecondDigits: ms_ct
   }) + " " + date.toLocaleDateString('en-US');
 }
 
-function applyStats(stats) {
+/*** LIVE for {uptime}/ No Connections ***
+ **  <span id="stat-uptime">___</span>  **/
+function uptimeStringify(uptime) {
+  let secs, mins, hrs;
+  secs = uptime % 60;
+  mins = Math.floor(uptime / 60);
+  hrs  = Math.floor(uptime / 3600);
+  return `${hrs}:${mins}:${secs}`
+}
+
+//let haslogged = false
+async function renderUptime() {
+  const req = await fetch("/api/uptime");
+  const j = await req.json();
+  const uptime = Number(j.uptime ?? 0);
+  //if (!haslogged) {
+  //  console.log(uptime);
+  //  haslogged = true;
+  //}
+  if (uptime > 0) {
+    return `LIVE for ${uptimeStringify(uptime)}`;
+  } else {
+    return "No Connections";
+  }
+}
+
+async function applyStats(stats) {
   const eps = Number(stats.events_per_sec || 0);
   if (ui.statEps) ui.statEps.textContent = eps.toFixed(1);
   if (ui.statAgents) ui.statAgents.textContent = String(stats.agent_count ?? 0);
-  if (ui.statUptime) ui.statUptime.textContent = fmtUptime(Number(stats.uptime_s || 0));
+  if (ui.statUptime) ui.statUptime.textContent = await renderUptime();
   if (hasEps) pushEps(eps);
 }
 
@@ -386,7 +412,7 @@ function renderProcs() {
       <td>${p.uid}</td>
       <td>${esc(p.comm)}</td>
       <td>${p.threads ?? 0}</td>
-      <td>${fmtEventTs(p.last_seen_s, p.last_seen_ms)}</td>
+      <td>${fmtEventTs(p.last_seen_s, p.last_seen_ms, 3)}</td>
     `;
     fragment.appendChild(tr);
   });
@@ -410,7 +436,7 @@ function prependFeedRow(tbodyId, ev) {
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
     <td>${ev.pid}</td>
     <td>${esc(ev.comm)}</td>
     <td class="arg-cell">${esc(ev.arg)}</td>
@@ -448,7 +474,7 @@ function prependEventRow(ev) {
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
     <td>${esc(ev.pid ?? "")}</td>
     <td>${esc(ev.ppid ?? "")}</td>
     <td>${esc(ev.uid ?? "")}</td>
@@ -469,7 +495,7 @@ function prependForkRow(ev) {
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
     <td>${esc(ev.pid ?? "")}</td>
     <td>${esc(ev.ppid ?? "")}</td>
     <td>${esc(ev.uid ?? "")}</td>
@@ -488,7 +514,7 @@ function prependForkExecRow(ev) {
 
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td>${fmtEventTs(ev.ts_s, ev.ts_ms)}</td>
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
     <td>${esc(ev.type ?? "")}</td>
     <td>${esc(ev.pid ?? "")}</td>
     <td>${esc(ev.ppid ?? "")}</td>
@@ -520,8 +546,8 @@ function boolToYesNo(value) {
 
 function processDetailsMarkup(row) {
   const details = [
-    ["Start", fmtEventTs(row.start_ts_s, row.start_ts_ms)],
-    ["Last", fmtEventTs(row.last_ts_s, row.last_ts_ms)],
+    ["Start", fmtEventTs(row.start_ts_s, row.start_ts_ms, 3)],
+    ["Last", fmtEventTs(row.last_ts_s, row.last_ts_ms, 3)],
     ["PID", row.pid ?? ""],
     ["PPID", row.ppid ?? ""],
     ["UID", row.uid ?? ""],
@@ -697,8 +723,8 @@ function renderLifecycleRows(rows) {
     const tr = document.createElement("tr");
     bindProcessHoverRow(tr, row, "lifecycle");
     tr.innerHTML = `
-      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
-      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms, 3)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms, 3)}</td>
       <td>${esc(row.pid ?? "")}</td>
       <td>${esc(row.ppid ?? "")}</td>
       <td>${esc(row.uid ?? "")}</td>
@@ -725,8 +751,8 @@ function renderDeadProcessesRows(rows) {
     const tr = document.createElement("tr");
     bindProcessHoverRow(tr, row, "dead-processes");
     tr.innerHTML = `
-      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms)}</td>
-      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms)}</td>
+      <td>${fmtEventTs(row.start_ts_s, row.start_ts_ms, 3)}</td>
+      <td>${fmtEventTs(row.last_ts_s, row.last_ts_ms, 3)}</td>
       <td>${esc(row.pid ?? "")}</td>
       <td>${esc(row.ppid ?? "")}</td>
       <td>${esc(row.uid ?? "")}</td>

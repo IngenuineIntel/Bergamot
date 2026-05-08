@@ -54,6 +54,10 @@ header h1 {
   color: var(--text-dim);
 }
 
+#stat-uptime {
+  text-align: center;
+}
+
 #stats-bar strong {
   color: var(--text);
 }
