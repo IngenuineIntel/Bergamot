@@ -990,11 +990,7 @@ async function loadSnapshot() {
 
   if (hasEps || hasStats) {
     tasks.push(
-      fetch("/api/stats")
-        .then((r) => r.json())
-        .then((stats) => {
-          applyStats(stats);
-        })
+      applyStats()
     );
   }
 
@@ -1021,7 +1017,8 @@ function connectSSE() {
   if (hasEps || hasStats) {
     es.addEventListener("stats", (e) => {
       try {
-        applyStats(JSON.parse(e.data));
+        applyStats(
+        );
       } catch (_) {}
     });
   }
