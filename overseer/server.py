@@ -40,6 +40,8 @@ LISTEN_PORT = 12046          # override via environment in app.py if desired
 def _handle_client(conn: socket.socket, addr):
     """Handles current underseer agent connection until it dies."""
     print(f"[over-seer] agent connected from {addr}", flush=True)
+    with store._lock:
+        store.is_agent = True
     buf = b""
     handshake_done = False
 
@@ -84,6 +86,8 @@ def _handle_client(conn: socket.socket, addr):
     except OSError:
         pass
     finally:
+        with store._lock:
+            store.is_agent = False
         try:
             conn.close()
         except OSError:
@@ -108,7 +112,7 @@ def _tcp_server_loop(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
 
 def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
     t = threading.Thread(target=store.conn_uptime_thread, args=(),
-                         daemon=False, name="bergamot-uptime-manager")
+                         daemon=True, name="bergamot-uptime-manager")
     u = threading.Thread(target=_tcp_server_loop, args=(host, port), daemon=True,
                          name="begamot-tcp-listener")
     t.start()

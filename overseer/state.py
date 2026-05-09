@@ -59,7 +59,7 @@ class EventStore:
 
         # stats
         self.conn_uptime = 0
-        self.agent_count: bool        = False
+        self.is_agent: bool        = False
         # keep all timestamps within the rolling rate window
         self._event_timestamps: deque = deque()
         self._rate_window: int       = rate_window
@@ -772,41 +772,26 @@ class EventStore:
             if value not in (None, "", 0)
         }
 
-    def get_stats(self) -> dict:
-        with self._lock:
-            now = time.monotonic()
-            cutoff = now - self._rate_window
-
-            while self._event_timestamps and self._event_timestamps[0] < cutoff:
-                self._event_timestamps.popleft()
-
-            recent = len(self._event_timestamps)
-            rate = recent / self._rate_window
-            uptime = int(time.time() - self.start_time)
-            agents = self.agent_count
-        return {
-            "events_per_sec": round(rate, 2),
-            "agent_count":    agents,
-            "uptime_s":       uptime,
-        }
-
     def get_eps(self) -> int:
         now = time.monotonic()
         cutoff = now - self._rate_window
         while self._event_timestamps and self._event_timestamps[0] < cutoff:
             self._event_timestamps.popleft()
         
-        recent = len(self_event_timestamps)
+        recent = len(self.event_timestamps)
         return recent / self._rate_window
 
     def conn_uptime_thread(self):
         while True:
             start = time.perf_counter()
-            if self.agent_count > 0:
-                with self._lock:
+            with self._lock:
+                if self.is_agent:
                     self.conn_uptime += 1
-            else: self.conn_uptime = 0
-            time.sleep(1 - (start - time.perf_counter()))
+                else:
+                    self.conn_uptime = 0
+
+            elapsed = time.perf_counter() - start
+            time.sleep(max(0.0, 1.0 - elapsed))
     
     def get_conn_uptime(self):
         with self._lock:
