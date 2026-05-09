@@ -23,9 +23,11 @@ cdef str BERGAMOT_VERSION
 cdef str WIRE_DST
 cdef int WIRE_PORT
 cdef float WIRE_HZ
+cdef float WIRE_SNAPSHOT_HZ
 cdef int WIRE_BATCH_MAX
 cdef int WIRE_REC_MAX
 cdef int WIRE_TIMEOUT
+cdef int WIRE_SNAPSHOT_SORT
 cdef str PROC_PATH
 # ── END CYTHON CDEFS ─────────────────────────────────────────────────────── #
 
@@ -69,10 +71,16 @@ WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
 WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
 WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
+WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
+
+if WIRE_HZ <= 0:
+    WIRE_HZ = 1
+if WIRE_SNAPSHOT_HZ <= 0:
+    WIRE_SNAPSHOT_HZ = 1
 
 
 def _read_first_line(path: str) -> str:
@@ -191,7 +199,7 @@ def collect_system_info() -> dict:
         "ram_gbs": _read_ram_gbs(),
     }
 
-def parse_line(line: str) -> dict | None:
+cdef object parse_line(str line):
     """
         Parse one procfs event line.
 
@@ -295,11 +303,16 @@ def parse_line(line: str) -> dict | None:
     except ValueError:
         return None
 
-def collect_process_snapshot() -> dict:
+cdef dict collect_process_snapshot():
     now = time.time()
     ts_s = int(now)
     ts_ms = int((now - ts_s) * 1000)
     processes: list[dict] = []
+    cdef int found
+    cdef bint got_name
+    cdef bint got_ppid
+    cdef bint got_uid
+    cdef bint got_threads
 
     for entry in os.scandir("/proc"):
         if not entry.name.isdigit() or not entry.is_dir(follow_symlinks=False):
@@ -312,16 +325,32 @@ def collect_process_snapshot() -> dict:
             uid = 0
             comm = ""
             threads = 0
+            found = 0
+            got_name = False
+            got_ppid = False
+            got_uid = False
+            got_threads = False
             with open(status_path, "r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
-                    if line.startswith("Name:\t"):
+                    if (not got_name) and line.startswith("Name:\t"):
                         comm = line.split("\t", 1)[1].strip()
-                    elif line.startswith("PPid:\t"):
+                        got_name = True
+                        found += 1
+                    elif (not got_ppid) and line.startswith("PPid:\t"):
                         ppid = int(line.split("\t", 1)[1].strip() or 0)
-                    elif line.startswith("Uid:\t"):
+                        got_ppid = True
+                        found += 1
+                    elif (not got_uid) and line.startswith("Uid:\t"):
                         uid = int(line.split("\t", 1)[1].split()[0])
-                    elif line.startswith("Threads:\t"):
+                        got_uid = True
+                        found += 1
+                    elif (not got_threads) and line.startswith("Threads:\t"):
                         threads = int(line.split("\t", 1)[1].strip() or 0)
+                        got_threads = True
+                        found += 1
+
+                    if found >= 4:
+                        break
 
             processes.append({
                 "pid": pid,
@@ -334,7 +363,6 @@ def collect_process_snapshot() -> dict:
             # Process exited (or became unreadable) while being sampled.
             continue
 
-    processes.sort(key=lambda p: p["pid"])
     return {
         "kind": "proc_snapshot",
         "ts_s": ts_s,
@@ -401,7 +429,10 @@ cdef class Sender:
         if self._sock is None:
             return False
 
-        payload = "\n".join(json.dumps(e) for e in payloads) + "\n"
+        payload = "\n".join(
+            json.dumps(e, separators=(",", ":"), ensure_ascii=False)
+            for e in payloads
+        ) + "\n"
         data = payload.encode("utf-8")
 
         try:
@@ -427,9 +458,13 @@ cpdef main():
     cdef Sender sender
     cdef bint lease_announced
     cdef double poll_interval
+    cdef double snapshot_interval
+    cdef double next_poll_at
     cdef double next_snapshot_at
     cdef double now_mono
+    cdef double sleep_for
     cdef list batch
+    cdef list outbound
     cdef object fh
     cdef str raw_line
     cdef object ev
@@ -439,13 +474,15 @@ cpdef main():
     sender.connect()
 
     poll_interval = 1 / WIRE_HZ
+    snapshot_interval = 1 / WIRE_SNAPSHOT_HZ
 
     print(f"[under-seer] polling /proc/all_seer every "
         f"{poll_interval * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
-        f"{poll_interval:.2f}s", flush=True)
+        f"{snapshot_interval:.2f}s", flush=True)
     lease_announced = False
-    next_snapshot_at = time.monotonic()
+    next_poll_at = time.monotonic()
+    next_snapshot_at = next_poll_at
 
     while True:
         # ── Read all available events from the proc file ─────────────────
@@ -466,7 +503,6 @@ cpdef main():
                         break
         except PermissionError:
             # Another process owns the proc file; wait and retry.
-            time.sleep(poll_interval)
             continue
         except FileNotFoundError:
             print(f"[under-seer] {PROC_PATH} unavailable — "
@@ -476,27 +512,32 @@ cpdef main():
             continue
         except OSError as exc:
             print(f"[under-seer] read error: {exc}", flush=True)
-            time.sleep(poll_interval)
             continue
 
         # ── Forward events to Over-Seer ───────────────────────────────────
-        if batch:
-            if not sender.send_batch(batch):
-                sender.connect()
-                # Retry the same batch once after reconnect.
-                sender.send_batch(batch)
-
         now_mono = time.monotonic()
+        outbound = batch
         if now_mono >= next_snapshot_at:
             snapshot = collect_process_snapshot()
-            if not sender.send_batch([snapshot]):
-                sender.connect()
-                sender.send_batch([snapshot])
+            outbound.append(snapshot)
 
             while next_snapshot_at <= now_mono:
-                next_snapshot_at += poll_interval
+                next_snapshot_at += snapshot_interval
 
-        time.sleep(poll_interval)
+        if outbound:
+            if not sender.send_batch(outbound):
+                sender.connect()
+                # Retry once after reconnect with the same payload.
+                sender.send_batch(outbound)
+
+        next_poll_at += poll_interval
+        now_mono = time.monotonic()
+        sleep_for = next_poll_at - now_mono
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+        else:
+            # Work overran the target poll period; resync to current time.
+            next_poll_at = now_mono
 
 
 if __name__ == "__main__":
