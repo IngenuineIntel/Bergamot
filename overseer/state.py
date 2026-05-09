@@ -778,7 +778,7 @@ class EventStore:
         while self._event_timestamps and self._event_timestamps[0] < cutoff:
             self._event_timestamps.popleft()
         
-        recent = len(self.event_timestamps)
+        recent = len(self._event_timestamps)
         return recent / self._rate_window
 
     def conn_uptime_thread(self):

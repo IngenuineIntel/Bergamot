@@ -244,9 +244,20 @@ async function renderEPS() {
 }
 
 async function applyStats() {
-  if (ui.statEps) ui.statEps.textContent = await renderEPS().toFixed(1);
-  if (ui.statUptime) ui.statUptime.textContent = await renderUptime();
-  if (hasEps) pushEps(eps);
+  const [epsResult, uptimeResult] = await Promise.allSettled([
+    renderEPS(),
+    renderUptime(),
+  ]);
+
+  if (ui.statEps && epsResult.status === "fulfilled") {
+    const eps = Number(epsResult.value ?? 0);
+    ui.statEps.textContent = eps.toFixed(1);
+    if (hasEps) pushEps(eps);
+  }
+
+  if (ui.statUptime && uptimeResult.status === "fulfilled") {
+    ui.statUptime.textContent = String(uptimeResult.value ?? "No Connections");
+  }
 }
 
 function formatOverviewValue(key, value) {
@@ -1197,4 +1208,10 @@ if (hasEps || hasStats || hasProcTable || hasOpenFeed || hasNetworkFeed || hasSy
       console.warn("Initial snapshot failed:", err);
       connectSSE();
     });
+}
+
+if (hasEps || hasStats) {
+  setInterval(() => {
+    applyStats().catch(() => {});
+  }, 1000);
 }
