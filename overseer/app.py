@@ -155,7 +155,6 @@ def api_stream():
     """
     Server-Sent Events endpoint.  Clients receive:
       - event: event  — every new raw event as it arrives
-      - event: stats  — a stats heartbeat once per second
       - event: ping   — keepalive every 15 s if no other traffic
     """
     def generate():
@@ -175,14 +174,14 @@ def api_stream():
                         sent_any = True
                     except queue.Empty:
                         break
-
+                """
                 # Stats heartbeat — once per second
                 if now - last_stats >= 1.0:
                     stats = json.dumps(store.get_stats())
                     yield f"event: stats\ndata: {stats}\n\n"
                     last_stats = now
                     last_ping  = now
-
+                """
                 # Keepalive ping — if no traffic for 15 s
                 if now - last_ping >= 15.0:
                     yield "event: ping\ndata: {}\n\n"
@@ -294,11 +293,9 @@ def api_dead_processes():
     rows = store.get_dead_processes(limit=limit, offset=offset)
     return jsonify(rows)
 
-
-@app.route("/api/stats")
-def api_stats():
-    """Return events/sec, connected agent count, and uptime."""
-    return jsonify(store.get_stats())
+@app.route("/api/eps")
+def api_eps():
+    return jsonify({"eps": store.get_eps()})
 
 @app.route("/api/uptime")
 def api_uptime():

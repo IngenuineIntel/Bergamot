@@ -41,27 +41,26 @@ def _normalize_system_info(system_info: dict | None) -> dict[str, str | int]:
 class EventStore:
     def __init__(self, max_file_opens: int = 1000, max_network: int = 500,
                  rate_window: int = 10):
+        # race condition? nah
         self._lock = threading.Lock()
 
-        self.conn_uptime = 0
-
-        # Live process table: pid (int) → dict
+        # live process table
         self.processes: dict[int, dict] = {}
 
-        # Scrolling logs
+        # scrolling logs
         self.file_opens: deque = deque(maxlen=max_file_opens)
         self.network:    deque = deque(maxlen=max_network)
         self.fork_events: deque = deque(maxlen=1000)
         self.execve_events: deque = deque(maxlen=1000)
         self.fork_exec_events: deque = deque(maxlen=1500)
 
-        # All recent events (combined) for the /api/events endpoint
+        # all recent events (combined) for the /api/events endpoint
         self.recent_events: deque = deque(maxlen=2000)
 
-        # Stats
-        self.start_time: float       = time.time()
-        self.agent_count: int        = 0
-        # Keep all timestamps within the rolling rate window.
+        # stats
+        self.conn_uptime = 0
+        self.agent_count: bool        = False
+        # keep all timestamps within the rolling rate window
         self._event_timestamps: deque = deque()
         self._rate_window: int       = rate_window
 
@@ -77,12 +76,12 @@ class EventStore:
         self._session_db_config: dict[str, str] | None = None
         self._session_system_info: dict[str, str | int] | None = None
 
-        # Active process lifecycle row mapping (pid -> procs.id)
+        # active process lifecycle row mapping (pid -> procs.id)
         self._active_proc_row_ids: dict[int, int] = {}
 
-        # Lifecycle tracking for UI/API snapshots.
-        # Active rows are keyed by pid; completed rows are archived in
-        # _dead_lifecycle_rows so they remain visible even when recent_events rolls.
+        # lifecycle tracking for UI/API snapshots
+        # active rows are keyed by pid; completed rows are archived in
+        # _dead_lifecycle_rows so they remain visible even when recent_events rolls
         self._active_lifecycle_rows: dict[int, dict] = {}
         self._dead_lifecycle_rows: deque = deque()
 
@@ -112,8 +111,6 @@ class EventStore:
 
             self._db_path = db_path
             conn = sqlite3.connect(db_path, timeout=5.0, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
 
             newdb_path = os.path.join(sql_dir, "newdb.sql")
             evententry_path = os.path.join(sql_dir, "evententry.sql")
@@ -610,15 +607,7 @@ class EventStore:
         self.processes = new_processes
         self._mark_lifecycle_rows_from_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
         self._persist_proc_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
-
-    def agent_connected(self):
-        with self._lock:
-            self.agent_count += 1
-
-    def agent_disconnected(self):
-        with self._lock:
-            self.agent_count = max(0, self.agent_count - 1)
-
+    
     # ── Snapshot helpers (return plain dicts/lists — safe to JSON-encode) ─
 
     def get_processes(self) -> list[dict]:
@@ -800,6 +789,15 @@ class EventStore:
             "agent_count":    agents,
             "uptime_s":       uptime,
         }
+
+    def get_eps(self) -> int:
+        now = time.monotonic()
+        cutoff = now - self._rate_window
+        while self._event_timestamps and self._event_timestamps[0] < cutoff:
+            self._event_timestamps.popleft()
+        
+        recent = len(self_event_timestamps)
+        return recent / self._rate_window
 
     def conn_uptime_thread(self):
         while True:

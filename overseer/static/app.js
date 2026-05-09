@@ -236,10 +236,15 @@ async function renderUptime() {
   }
 }
 
-async function applyStats(stats) {
-  const eps = Number(stats.events_per_sec || 0);
-  if (ui.statEps) ui.statEps.textContent = eps.toFixed(1);
-  if (ui.statAgents) ui.statAgents.textContent = String(stats.agent_count ?? 0);
+/*** EVENTS/SECOND ***/
+async function renderEPS() {
+  const req = await fetch("/api/eps");
+  const j = await req.json();
+  return Number(j.eps ?? 0);
+}
+
+async function applyStats() {
+  if (ui.statEps) ui.statEps.textContent = await renderEPS().toFixed(1);
   if (ui.statUptime) ui.statUptime.textContent = await renderUptime();
   if (hasEps) pushEps(eps);
 }

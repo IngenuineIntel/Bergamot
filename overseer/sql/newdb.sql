@@ -1,5 +1,7 @@
 -- newdb.sql
 -- script for starting a new database
+PRAGMA jorunal_mode=WAL;
+PRAGMA busy_timeout=5000;
 
 CREATE TABLE metadata (
     db_name TEXT,

@@ -32,17 +32,16 @@ import threading
 from state import store
 
 LISTEN_HOST = "0.0.0.0"
-LISTEN_PORT = 9000          # override via environment in app.py if desired
+LISTEN_PORT = 12046          # override via environment in app.py if desired
 
 # TODO this should not be allowing multiple agents, but I'm currently working
 # around the framework already built
 
 def _handle_client(conn: socket.socket, addr):
-    """One thread per connected Under-Seer agent."""
+    """Handles current underseer agent connection until it dies."""
     print(f"[over-seer] agent connected from {addr}", flush=True)
     buf = b""
     handshake_done = False
-    counted_agent = False
 
     try:
         while True:
@@ -72,8 +71,6 @@ def _handle_client(conn: socket.socket, addr):
                         if initialized and db_path:
                             print(f"[over-seer] session db initialized at {db_path}", flush=True)
 
-                        store.agent_connected()
-                        counted_agent = True
                         handshake_done = True
                         continue
 
@@ -87,37 +84,32 @@ def _handle_client(conn: socket.socket, addr):
     except OSError:
         pass
     finally:
-        if counted_agent:
-            store.agent_disconnected()
         try:
             conn.close()
         except OSError:
             pass
         print(f"[over-seer] agent disconnected from {addr}", flush=True)
 
-
-def _accept_loop(server_sock: socket.socket):
-    while True:
-        try:
-            conn, addr = server_sock.accept()
-        except OSError:
-            break  # socket was closed (shutdown)
-        t = threading.Thread(target=_handle_client, args=(conn, addr),
-                             daemon=True, name=f"agent-{addr}")
-        t.start()
-
-def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
-    """Bind the TCP listener and start the accept loop in a daemon thread."""
+def _tcp_server_loop(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
+    """Bind TCP listener and connection manager to a separate thread."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_sock.bind((host, port))
     server_sock.listen(16)
-    print(f"[over-seer] TCP listener on {host}:{port}", flush=True)
+    print(f"[overseer] TCP listener on {host}:{port}", flush=True)
+    while True:
+        try:
+            print("[overseer] waiting for TCP connection from agent")
+            conn, addr = server_sock.accept()
+            print("[overseer] connection accepted...")
+            _handle_client(conn, addr)
+        except OSError:
+            break # socket was closed (shutdown?)
 
+def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
     t = threading.Thread(target=store.conn_uptime_thread, args=(),
-                         daemon=False, name="uptime-manager")
-    u = threading.Thread(target=_accept_loop, args=(server_sock,),
-                         daemon=True, name="tcp-accept")
+                         daemon=False, name="bergamot-uptime-manager")
+    u = threading.Thread(target=_tcp_server_loop, args=(host, port), daemon=True,
+                         name="begamot-tcp-listener")
     t.start()
     u.start()
-    return server_sock
