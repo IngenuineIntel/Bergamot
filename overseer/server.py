@@ -26,9 +26,11 @@ Start this before (or alongside) the Flask app:
 """
 
 import json
+import os
 import socket
 import struct
 import threading
+import zlib
 
 from state import store
 
@@ -40,6 +42,12 @@ WIRE_VERSION = 2
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
 WIRE_KIND_PROC_SNAPSHOT = 3
+WIRE_FLAG_CHECKSUM = 0x01
+WIRE_ALLOWED_FLAGS = WIRE_FLAG_CHECKSUM
+try:
+    WIRE_MAX_FRAME_BYTES = max(256, int(os.environ.get("BERGAMOT_WIRE_MAX_FRAME_BYTES", "1048576")))
+except ValueError:
+    WIRE_MAX_FRAME_BYTES = 1024 * 1024
 
 WIRE_TYPE_MAP = {
     1: "open",
@@ -184,6 +192,17 @@ def _handle_client(conn: socket.socket, addr):
     buf = b""
     handshake_done = False
     mode = None
+    metrics = {
+        "frames_rx": 0,
+        "bad_magic": 0,
+        "bad_version": 0,
+        "bad_flags": 0,
+        "oversized": 0,
+        "bad_checksum": 0,
+        "decode_err": 0,
+        "unknown_kind": 0,
+        "json_malformed": 0,
+    }
 
     try:
         while True:
@@ -200,19 +219,31 @@ def _handle_client(conn: socket.socket, addr):
                     mode = "json"
 
             if mode == "binary":
-                header_sz = struct.calcsize("!4sBBBBI")
+                header_sz = struct.calcsize("!4sBBBBII")
                 while len(buf) >= header_sz:
-                    magic, version, kind, _flags, _reserved, payload_len = struct.unpack(
-                        "!4sBBBBI", buf[:header_sz]
+                    magic, version, kind, flags, _reserved, payload_len, checksum = struct.unpack(
+                        "!4sBBBBII", buf[:header_sz]
                     )
+                    metrics["frames_rx"] += 1
 
                     if magic != WIRE_MAGIC:
+                        metrics["bad_magic"] += 1
                         print(f"[over-seer] protocol error from {addr}: bad magic", flush=True)
                         return
                     if version != WIRE_VERSION:
+                        metrics["bad_version"] += 1
                         print(f"[over-seer] protocol error from {addr}: unsupported version {version}", flush=True)
                         return
-                    if payload_len > (16 * 1024 * 1024):
+                    if flags & ~WIRE_ALLOWED_FLAGS:
+                        metrics["bad_flags"] += 1
+                        print(f"[over-seer] protocol error from {addr}: unknown flags 0x{flags:x}", flush=True)
+                        return
+                    if not (flags & WIRE_FLAG_CHECKSUM):
+                        metrics["bad_flags"] += 1
+                        print(f"[over-seer] protocol error from {addr}: missing checksum flag", flush=True)
+                        return
+                    if payload_len > WIRE_MAX_FRAME_BYTES:
+                        metrics["oversized"] += 1
                         print(f"[over-seer] protocol error from {addr}: frame too large ({payload_len})", flush=True)
                         return
 
@@ -223,9 +254,16 @@ def _handle_client(conn: socket.socket, addr):
                     payload = buf[header_sz:total]
                     buf = buf[total:]
 
+                    calc_sum = zlib.crc32(payload) & 0xFFFFFFFF
+                    if checksum != calc_sum:
+                        metrics["bad_checksum"] += 1
+                        print(f"[over-seer] protocol error from {addr}: checksum mismatch", flush=True)
+                        return
+
                     try:
                         ev = _decode_binary_frame(kind, payload)
                         if not isinstance(ev, dict):
+                            metrics["unknown_kind"] += 1
                             continue
 
                         if not handshake_done:
@@ -242,6 +280,7 @@ def _handle_client(conn: socket.socket, addr):
 
                         store.add_event(ev)
                     except Exception as exc:
+                        metrics["decode_err"] += 1
                         print(f"[over-seer] binary decode failed for {addr}: {exc}", flush=True)
                         return
             elif mode == "json":
@@ -271,6 +310,7 @@ def _handle_client(conn: socket.socket, addr):
 
                         store.add_event(ev)
                     except (json.JSONDecodeError, UnicodeDecodeError):
+                        metrics["json_malformed"] += 1
                         pass  # malformed line — skip silently
                     except Exception as exc:
                         print(f"[over-seer] connection setup failed for {addr}: {exc}",
@@ -285,6 +325,16 @@ def _handle_client(conn: socket.socket, addr):
             conn.close()
         except OSError:
             pass
+        if any(v for v in metrics.values()):
+            print(
+                f"[over-seer] protocol stats {addr}: "
+                f"frames_rx={metrics['frames_rx']} bad_magic={metrics['bad_magic']} "
+                f"bad_version={metrics['bad_version']} bad_flags={metrics['bad_flags']} "
+                f"oversized={metrics['oversized']} bad_checksum={metrics['bad_checksum']} "
+                f"decode_err={metrics['decode_err']} unknown_kind={metrics['unknown_kind']} "
+                f"json_malformed={metrics['json_malformed']}",
+                flush=True,
+            )
         print(f"[over-seer] agent disconnected from {addr}", flush=True)
 
 def _tcp_server_loop(host: str = LISTEN_HOST, port: int = LISTEN_PORT):

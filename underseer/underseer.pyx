@@ -43,6 +43,7 @@ import struct
 import sys
 import threading
 import time
+import zlib
 
 import underseer_workers
 
@@ -81,6 +82,8 @@ WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
 WIRE_EVENT_QUEUE_MAX = envvar_fetch("BERGAMOT_EVENT_QUEUE_MAX", int, 64)
 WIRE_SNAPSHOT_QUEUE_MAX = envvar_fetch("BERGAMOT_SNAPSHOT_QUEUE_MAX", int, 8)
+WIRE_MAX_FRAME_BYTES = envvar_fetch("BERGAMOT_WIRE_MAX_FRAME_BYTES", int,
+                                    1024 * 1024)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
@@ -90,6 +93,7 @@ WIRE_VERSION = 2
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
 WIRE_KIND_PROC_SNAPSHOT = 3
+WIRE_FLAG_CHECKSUM = 0x01
 
 WIRE_TYPE_MAP = {
     "open": 1,
@@ -112,6 +116,10 @@ if WIRE_HZ <= 0:
     WIRE_HZ = 1
 if WIRE_SNAPSHOT_HZ <= 0:
     WIRE_SNAPSHOT_HZ = 1
+if WIRE_MAX_FRAME_BYTES < 256:
+    WIRE_MAX_FRAME_BYTES = 256
+if WIRE_PROTOCOL not in ("json", "binary"):
+    WIRE_PROTOCOL = "json"
 
 
 def _read_first_line(path: str) -> str:
@@ -295,7 +303,17 @@ def _encode_snapshot_payload(obj: dict) -> bytes:
 
 
 def _encode_frame(kind: int, payload: bytes) -> bytes:
-    return struct.pack("!4sBBBBI", WIRE_MAGIC, WIRE_VERSION, kind, 0, 0, len(payload)) + payload
+    csum = zlib.crc32(payload) & 0xFFFFFFFF
+    return struct.pack(
+        "!4sBBBBII",
+        WIRE_MAGIC,
+        WIRE_VERSION,
+        kind,
+        WIRE_FLAG_CHECKSUM,
+        0,
+        len(payload),
+        csum,
+    ) + payload
 
 cdef object parse_line(str line):
     """
@@ -521,11 +539,11 @@ cdef class Sender:
             self._backoff = min(self._backoff * 2, WIRE_REC_MAX)
             return False
 
-    cdef void connect(self):
+    cpdef void connect(self):
         while not self._connect():
             pass
 
-    cdef bint send_batch(self, list events):
+    cpdef bint send_batch(self, list events):
         """
         Encode and send a batch of events.  Returns False if the connection
         was lost; caller should reconnect and retry.
@@ -542,6 +560,7 @@ cdef class Sender:
         cdef bytes bin_payload
         cdef int kind
         cdef list frames
+        cdef int dropped_frames = 0
         if self._sock is None:
             return False
 
@@ -561,7 +580,18 @@ cdef class Sender:
                     kind = WIRE_KIND_EVENT
                     bin_payload = _encode_event_payload(obj)
 
+                if len(bin_payload) > WIRE_MAX_FRAME_BYTES:
+                    dropped_frames += 1
+                    continue
+
                 frames.append(_encode_frame(kind, bin_payload))
+
+            if dropped_frames:
+                print(f"[under-seer] dropped {dropped_frames} oversized frame(s)",
+                      flush=True)
+
+            if not frames:
+                return True
 
             data = b"".join(frames)
         else:

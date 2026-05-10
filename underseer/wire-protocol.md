@@ -4,7 +4,7 @@ This document defines the wire protocol between Underseer and Overseer.
 
 It has two sections:
 - V1: current production protocol (NDJSON over TCP)
-- V2: planned binary framed protocol (migration target)
+- V2: binary framed protocol (implemented and selectable)
 
 ## V1 (Current): NDJSON over TCP
 
@@ -104,9 +104,11 @@ Human-readable JSON equivalent:
 - Packet boundaries do not equal message boundaries.
 - Message boundaries are newline delimiters in the byte stream.
 
-## V2 (Planned): Binary framed protocol
+## V2 (Implemented): Binary framed protocol
 
-Status: planned migration target. Not production default yet.
+Status: implemented and selectable with `BERGAMOT_WIRE_PROTOCOL=binary`.
+
+Default remains `json` for compatibility.
 
 ### Goals
 - Remove newline-delimited JSON transport overhead.
@@ -114,27 +116,92 @@ Status: planned migration target. Not production default yet.
 - Decode into the same event dictionary shape inside Overseer.
 - Keep browser/API JSON outputs unchanged.
 
-### Frame structure (proposed)
-Each frame:
-- magic (fixed bytes)
-- protocol version
-- message kind
-- flags
-- payload length
-- payload bytes
+### Frame structure (on wire)
+Each frame is network byte order (big-endian):
 
-Optional for hardening:
-- checksum field in header or trailer
+- `magic`: 4 bytes (`BGW2`)
+- `version`: 1 byte (`2`)
+- `kind`: 1 byte
+- `flags`: 1 byte
+- `reserved`: 1 byte
+- `payload_len`: 4 bytes
+- `checksum`: 4 bytes (CRC32 of payload)
+- `payload`: `payload_len` bytes
 
-### Message kinds (proposed)
+Header pack format used in code: `!4sBBBBII`.
+
+Current hardening rules:
+- checksum flag is required (`flags & 0x01`)
+- unknown flag bits are rejected
+- oversized frames are rejected (max controlled by `BERGAMOT_WIRE_MAX_FRAME_BYTES`, default 1048576)
+- checksum mismatch is rejected
+
+### Message kinds
 - system_info
 - event
 - proc_snapshot
 
-### Compatibility strategy (planned)
-- Deploy Overseer dual-mode first.
-- Roll out Underseer binary sender incrementally.
-- Keep compatibility period before retiring NDJSON.
+### Compatibility strategy
+- Overseer supports dual mode (JSON NDJSON and binary framed).
+- Receiver mode is auto-detected by first bytes (`BGW2` means binary).
+- Underseer chooses send mode via `BERGAMOT_WIRE_PROTOCOL`.
+- Recommended rollout: deploy Overseer dual-mode first, then migrate Underseer agents.
+
+### Human-readable JSON equivalents (V2 payload semantics)
+V2 payloads decode back into the same in-memory dictionaries as V1. Equivalent examples:
+
+`system_info` equivalent:
+
+```json
+{
+  "kind": "system_info",
+  "hostname": "host-a",
+  "kernelver": "6.11.0 x86_64",
+  "distro": "Fedora Linux 42",
+  "ipaddr": "192.168.1.20",
+  "macaddr": "aa:bb:cc:dd:ee:ff",
+  "processor": "Intel(R) Core(TM) i7-12700H",
+  "processor_vend": "GenuineIntel",
+  "ram_gbs": 32
+}
+```
+
+`event` equivalent:
+
+```json
+{
+  "ts_s": 1778387001,
+  "ts_ms": 123,
+  "pid": 2134,
+  "ppid": 1,
+  "uid": 1000,
+  "type": "execve",
+  "subtype": "__x64_sys_execve",
+  "comm": "bash",
+  "arg": "/usr/bin/ls",
+  "arg1": "/usr/bin/ls",
+  "arg2": ""
+}
+```
+
+`proc_snapshot` equivalent:
+
+```json
+{
+  "kind": "proc_snapshot",
+  "ts_s": 1778387002,
+  "ts_ms": 500,
+  "processes": [
+    {
+      "pid": 1,
+      "ppid": 0,
+      "uid": 0,
+      "comm": "systemd",
+      "threads": 1
+    }
+  ]
+}
+```
 
 ## Canonical in-memory target shape
 Regardless of wire encoding, Overseer should convert inbound messages to the same dictionary structures currently consumed by state ingestion:
