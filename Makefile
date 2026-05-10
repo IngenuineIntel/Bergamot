@@ -48,8 +48,8 @@ underseer_run: underseer_build
 underseer_clean:
 	-rm -rf $(UNDERSEER_DIR)/build
 	-rm -rf $(UNDERSEER_DIR)/__pycache__
-	-rm -f $(UNDERSEER_DIR)/underseer.c
-	-rm -f $(UNDERSEER_DIR)/underseer.*.so
+	-rm -f $(UNDERSEER_DIR)/*.c
+	-rm -f $(UNDERSEER_DIR)/*.cpython*
 
 # overseer
 overseer_prep_env:

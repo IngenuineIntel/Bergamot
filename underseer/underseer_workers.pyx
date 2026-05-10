@@ -1,0 +1,92 @@
+# underseer_workers.pyx
+# multithreadees
+import queue
+import sys
+import time
+
+
+def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
+                     wire_batch_max, parse_line_cb, queue_put_cb):
+    lease_announced = False
+    next_poll_at = time.monotonic()
+
+    while not stop_event.is_set():
+        batch = []
+        try:
+            with open(proc_path, "r") as fh:
+                if not lease_announced:
+                    print(f"[under-seer] {proc_path} access claimed", flush=True)
+                    lease_announced = True
+                for raw_line in fh:
+                    ev = parse_line_cb(raw_line)
+                    if ev:
+                        batch.append(ev)
+                    if len(batch) >= wire_batch_max:
+                        break
+        except PermissionError:
+            continue
+        except FileNotFoundError:
+            print(f"[under-seer] {proc_path} unavailable — "
+                  "owned by another parent scope or module not loaded",
+                  file=sys.stderr, flush=True)
+            time.sleep(5)
+            continue
+        except OSError as exc:
+            print(f"[under-seer] read error: {exc}", flush=True)
+            continue
+
+        if batch:
+            queue_put_cb(event_queue, batch)
+
+        next_poll_at += poll_interval
+        now_mono = time.monotonic()
+        sleep_for = next_poll_at - now_mono
+        if sleep_for > 0:
+            stop_event.wait(sleep_for)
+        else:
+            next_poll_at = now_mono
+
+
+def snapshot_worker_run(snapshot_queue, stop_event, snapshot_interval,
+                        collect_snapshot_cb, queue_put_cb):
+    next_snapshot_at = time.monotonic()
+
+    while not stop_event.is_set():
+        now_mono = time.monotonic()
+        if now_mono >= next_snapshot_at:
+            snap = collect_snapshot_cb()
+            queue_put_cb(snapshot_queue, snap)
+
+            while next_snapshot_at <= now_mono:
+                next_snapshot_at += snapshot_interval
+
+        sleep_for = next_snapshot_at - time.monotonic()
+        if sleep_for > 0:
+            stop_event.wait(sleep_for)
+
+
+def sender_run(sender, event_queue, snapshot_queue, stop_event):
+    while not stop_event.is_set():
+        outbound = []
+
+        try:
+            batch = event_queue.get(timeout=0.25)
+            if isinstance(batch, list) and batch:
+                outbound.extend(batch)
+        except queue.Empty:
+            pass
+
+        latest_snapshot = None
+        while True:
+            try:
+                latest_snapshot = snapshot_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        if latest_snapshot is not None:
+            outbound.append(latest_snapshot)
+
+        if outbound:
+            if not sender.send_batch(outbound):
+                sender.connect()
+                sender.send_batch(outbound)

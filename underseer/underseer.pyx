@@ -37,9 +37,14 @@ import contextlib
 import json
 import os
 import platform
+import queue
 import socket
+import struct
 import sys
+import threading
 import time
+
+import underseer_workers
 
 # ── SWITCH HARDENING ─────────────────────────────────────────────────────── #
 """
@@ -70,12 +75,38 @@ WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
 WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
+WIRE_PROTOCOL  = envvar_fetch("BERGAMOT_WIRE_PROTOCOL", str, "json").strip().lower()
 WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
 WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
+WIRE_EVENT_QUEUE_MAX = envvar_fetch("BERGAMOT_EVENT_QUEUE_MAX", int, 64)
+WIRE_SNAPSHOT_QUEUE_MAX = envvar_fetch("BERGAMOT_SNAPSHOT_QUEUE_MAX", int, 8)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
+
+WIRE_MAGIC = b"BGW2"
+WIRE_VERSION = 2
+WIRE_KIND_SYSTEM_INFO = 1
+WIRE_KIND_EVENT = 2
+WIRE_KIND_PROC_SNAPSHOT = 3
+
+WIRE_TYPE_MAP = {
+    "open": 1,
+    "fork": 2,
+    "connect": 3,
+    "execve": 4,
+    "accept": 5,
+    "unlink": 6,
+    "rename": 7,
+    "setuid": 8,
+    "setgid": 9,
+    "setreuid": 10,
+    "capset": 11,
+    "keyctl": 12,
+    "ptrace": 13,
+    "getid": 14,
+}
 
 if WIRE_HZ <= 0:
     WIRE_HZ = 1
@@ -198,6 +229,73 @@ def collect_system_info() -> dict:
         "processor_vend": processor_vend,
         "ram_gbs": _read_ram_gbs(),
     }
+
+
+def _pack_str(val: object) -> bytes:
+    data = str(val or "").encode("utf-8", errors="replace")
+    if len(data) > 65535:
+        data = data[:65535]
+    return struct.pack("!H", len(data)) + data
+
+
+def _encode_system_info_payload(obj: dict) -> bytes:
+    return b"".join([
+        _pack_str(obj.get("hostname", "")),
+        _pack_str(obj.get("kernelver", "")),
+        _pack_str(obj.get("distro", "")),
+        _pack_str(obj.get("ipaddr", "")),
+        _pack_str(obj.get("macaddr", "")),
+        _pack_str(obj.get("processor", "")),
+        _pack_str(obj.get("processor_vend", "")),
+        struct.pack("!i", int(obj.get("ram_gbs", 0) or 0)),
+    ])
+
+
+def _encode_event_payload(obj: dict) -> bytes:
+    ev_type = str(obj.get("type", "") or "")
+    type_id = int(WIRE_TYPE_MAP.get(ev_type, 0))
+    ts_s = int(obj.get("ts_s", 0) or 0)
+    ts_ms = int(obj.get("ts_ms", 0) or 0)
+    pid = int(obj.get("pid", 0) or 0)
+    ppid = int(obj.get("ppid", 0) or 0)
+    uid = int(obj.get("uid", 0) or 0)
+
+    return b"".join([
+        struct.pack("!qHiiiB", ts_s, ts_ms, pid, ppid, uid, type_id),
+        _pack_str(obj.get("subtype", "")),
+        _pack_str(obj.get("comm", "")),
+        _pack_str(obj.get("arg1", obj.get("arg", ""))),
+        _pack_str(obj.get("arg2", "")),
+    ])
+
+
+def _encode_snapshot_payload(obj: dict) -> bytes:
+    ts_s = int(obj.get("ts_s", 0) or 0)
+    ts_ms = int(obj.get("ts_ms", 0) or 0)
+    rows = obj.get("processes", [])
+    if not isinstance(rows, list):
+        rows = []
+    if len(rows) > 65535:
+        rows = rows[:65535]
+
+    chunks = [struct.pack("!qHH", ts_s, ts_ms, len(rows))]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        chunks.append(struct.pack(
+            "!iiiH",
+            int(row.get("pid", 0) or 0),
+            int(row.get("ppid", 0) or 0),
+            int(row.get("uid", 0) or 0),
+            int(row.get("threads", 0) or 0),
+        ))
+        chunks.append(_pack_str(row.get("comm", "")))
+
+    return b"".join(chunks)
+
+
+def _encode_frame(kind: int, payload: bytes) -> bytes:
+    return struct.pack("!4sBBBBI", WIRE_MAGIC, WIRE_VERSION, kind, 0, 0, len(payload)) + payload
 
 cdef object parse_line(str line):
     """
@@ -371,6 +469,20 @@ cdef dict collect_process_snapshot():
     }
 
 
+def _queue_put_drop_oldest(q: object, item: object):
+    try:
+        q.put_nowait(item)
+    except queue.Full:
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            q.put_nowait(item)
+        except queue.Full:
+            pass
+
+
 # ── TCP sender with reconnect back-off ───────────────────────────────────── #
 
 cdef class Sender:
@@ -426,14 +538,38 @@ cdef class Sender:
     cdef bint _send_objects(self, list payloads):
         cdef str payload
         cdef bytes data
+        cdef object obj
+        cdef bytes bin_payload
+        cdef int kind
+        cdef list frames
         if self._sock is None:
             return False
 
-        payload = "\n".join(
-            json.dumps(e, separators=(",", ":"), ensure_ascii=False)
-            for e in payloads
-        ) + "\n"
-        data = payload.encode("utf-8")
+        if WIRE_PROTOCOL == "binary":
+            frames = []
+            for obj in payloads:
+                if not isinstance(obj, dict):
+                    continue
+
+                if obj.get("kind") == "system_info":
+                    kind = WIRE_KIND_SYSTEM_INFO
+                    bin_payload = _encode_system_info_payload(obj)
+                elif obj.get("kind") == "proc_snapshot":
+                    kind = WIRE_KIND_PROC_SNAPSHOT
+                    bin_payload = _encode_snapshot_payload(obj)
+                else:
+                    kind = WIRE_KIND_EVENT
+                    bin_payload = _encode_event_payload(obj)
+
+                frames.append(_encode_frame(kind, bin_payload))
+
+            data = b"".join(frames)
+        else:
+            payload = "\n".join(
+                json.dumps(e, separators=(",", ":"), ensure_ascii=False)
+                for e in payloads
+            ) + "\n"
+            data = payload.encode("utf-8")
 
         try:
             self._sock.sendall(data)
@@ -456,19 +592,13 @@ cdef class Sender:
 
 cpdef main():
     cdef Sender sender
-    cdef bint lease_announced
     cdef double poll_interval
     cdef double snapshot_interval
-    cdef double next_poll_at
-    cdef double next_snapshot_at
-    cdef double now_mono
-    cdef double sleep_for
-    cdef list batch
-    cdef list outbound
-    cdef object fh
-    cdef str raw_line
-    cdef object ev
-    cdef dict snapshot
+    cdef object event_queue
+    cdef object snapshot_queue
+    cdef object stop_event
+    cdef object event_thread
+    cdef object snapshot_thread
 
     sender = Sender(WIRE_DST, WIRE_PORT)
     sender.connect()
@@ -477,67 +607,52 @@ cpdef main():
     snapshot_interval = 1 / WIRE_SNAPSHOT_HZ
 
     print(f"[under-seer] polling /proc/all_seer every "
-        f"{poll_interval * 1000:.0f}ms", flush=True)
+          f"{poll_interval * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
-        f"{snapshot_interval:.2f}s", flush=True)
-    lease_announced = False
-    next_poll_at = time.monotonic()
-    next_snapshot_at = next_poll_at
+          f"{snapshot_interval:.2f}s", flush=True)
+    print(f"[under-seer] wire protocol mode: {WIRE_PROTOCOL}", flush=True)
+    print("[under-seer] threading enabled: event-reader, snapshot-worker, sender",
+          flush=True)
 
-    while True:
-        # ── Read all available events from the proc file ─────────────────
-        # This open/read path is the kernel/userspace handoff. For All-Seer,
-        # this process is expected to be the exclusive authorized reader.
-        batch = []
-        try:
-            with open(PROC_PATH, "r") as fh:
-                if not lease_announced:
-                    print(f"[under-seer] {PROC_PATH} access claimed",
-                          flush=True)
-                    lease_announced = True
-                for raw_line in fh:
-                    ev = parse_line(raw_line)
-                    if ev:
-                        batch.append(ev)
-                    if len(batch) >= WIRE_BATCH_MAX:
-                        break
-        except PermissionError:
-            # Another process owns the proc file; wait and retry.
-            continue
-        except FileNotFoundError:
-            print(f"[under-seer] {PROC_PATH} unavailable — "
-                  "owned by another parent scope or module not loaded",
-                  file=sys.stderr, flush=True)
-            time.sleep(5)
-            continue
-        except OSError as exc:
-            print(f"[under-seer] read error: {exc}", flush=True)
-            continue
+    event_queue = queue.Queue(maxsize=max(1, WIRE_EVENT_QUEUE_MAX))
+    snapshot_queue = queue.Queue(maxsize=max(1, WIRE_SNAPSHOT_QUEUE_MAX))
+    stop_event = threading.Event()
 
-        # ── Forward events to Over-Seer ───────────────────────────────────
-        now_mono = time.monotonic()
-        outbound = batch
-        if now_mono >= next_snapshot_at:
-            snapshot = collect_process_snapshot()
-            outbound.append(snapshot)
+    event_thread = threading.Thread(
+        target=underseer_workers.event_reader_run,
+        args=(
+            event_queue,
+            stop_event,
+            poll_interval,
+            PROC_PATH,
+            WIRE_BATCH_MAX,
+            parse_line,
+            _queue_put_drop_oldest,
+        ),
+        daemon=True,
+        name="underseer-event-reader",
+    )
+    snapshot_thread = threading.Thread(
+        target=underseer_workers.snapshot_worker_run,
+        args=(
+            snapshot_queue,
+            stop_event,
+            snapshot_interval,
+            collect_process_snapshot,
+            _queue_put_drop_oldest,
+        ),
+        daemon=True,
+        name="underseer-snapshot-worker",
+    )
 
-            while next_snapshot_at <= now_mono:
-                next_snapshot_at += snapshot_interval
+    event_thread.start()
+    snapshot_thread.start()
 
-        if outbound:
-            if not sender.send_batch(outbound):
-                sender.connect()
-                # Retry once after reconnect with the same payload.
-                sender.send_batch(outbound)
-
-        next_poll_at += poll_interval
-        now_mono = time.monotonic()
-        sleep_for = next_poll_at - now_mono
-        if sleep_for > 0:
-            time.sleep(sleep_for)
-        else:
-            # Work overran the target poll period; resync to current time.
-            next_poll_at = now_mono
+    try:
+        underseer_workers.sender_run(sender, event_queue, snapshot_queue,
+                                     stop_event)
+    finally:
+        stop_event.set()
 
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@ allseer/.module-common.o
 **/__pycache__/
 
 # Cython artifacts
-underseer/underseer.c
-underseer/underseer.cpython*
+underseer/*.c
+underseer/*.cpython*
 underseer/build
 
 # SQLite databases
