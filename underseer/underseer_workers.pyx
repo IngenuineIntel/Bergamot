@@ -55,7 +55,11 @@ def snapshot_worker_run(snapshot_queue, stop_event, snapshot_interval,
         now_mono = time.monotonic()
         if now_mono >= next_snapshot_at:
             snap = collect_snapshot_cb()
-            queue_put_cb(snapshot_queue, snap)
+            if isinstance(snap, list):
+                for item in snap:
+                    queue_put_cb(snapshot_queue, item)
+            else:
+                queue_put_cb(snapshot_queue, snap)
 
             while next_snapshot_at <= now_mono:
                 next_snapshot_at += snapshot_interval
@@ -76,15 +80,16 @@ def sender_run(sender, event_queue, snapshot_queue, stop_event):
         except queue.Empty:
             pass
 
-        latest_snapshot = None
+        snapshots = []
         while True:
             try:
-                latest_snapshot = snapshot_queue.get_nowait()
+                snap = snapshot_queue.get_nowait()
+                snapshots.append(snap)
             except queue.Empty:
                 break
 
-        if latest_snapshot is not None:
-            outbound.append(latest_snapshot)
+        if snapshots:
+            outbound.extend(snapshots)
 
         if outbound:
             if not sender.send_batch(outbound):

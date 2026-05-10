@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""
-System info handshake (first JSON object on each TCP connection):
-    {"kind": "system_info", "hostname": "<str>", "kernelver": "<str>",
-     "distro": "<str>", "ipaddr": "<str>", "macaddr": "<str>",
-     "processor": "<str>", "processor_vend": "<str>",
-     "ram_gbs": <int>}
-
-Syscall wire format (one JSON object per line):
-    {"ts_s": <unix-seconds>, "ts_ms": <0-999>, "pid": <int>,
-     "ppid": <int>, "uid": <int>,
-    "type": "open"|"fork"|"connect"|"execve", "subtype": "<str>",
-    "comm": "<str>", "arg": "<str>", "arg1": "<str>",
-    "arg2": "<str>"}
-
-Process snapshot wire format (one JSON object per line):
-        {"kind": "proc_snapshot", "ts_s": <unix-seconds>, "ts_ms": <0-999>,
-         "processes": [{"pid": <int>, "ppid": <int>, "uid": <int>,
-                                        "comm": "<str>", "threads": <int>}, ...]}
-"""
+"""Underseer agent for Bergamot binary wire protocol v1."""
 # ── CYTHON CDEFS ─────────────────────────────────────────────────────────── #
 cdef str BERGAMOT_VERSION
 cdef str WIRE_DST
@@ -34,7 +16,6 @@ cdef str PROC_PATH
 BERGAMOT_VERSION = "1.0"
 
 import contextlib
-import json
 import os
 import platform
 import queue
@@ -76,7 +57,6 @@ WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
 WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
-WIRE_PROTOCOL  = envvar_fetch("BERGAMOT_WIRE_PROTOCOL", str, "json").strip().lower()
 WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
 WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
 WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
@@ -88,11 +68,12 @@ WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
 
-WIRE_MAGIC = b"BGW2"
-WIRE_VERSION = 2
+WIRE_MAGIC = b"BGW1"
+WIRE_VERSION = 1
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
-WIRE_KIND_PROC_SNAPSHOT = 3
+WIRE_KIND_RICH_PROC_SNAPSHOT = 4
+WIRE_KIND_SYSTEM_PERF = 5
 WIRE_FLAG_CHECKSUM = 0x01
 
 WIRE_TYPE_MAP = {
@@ -118,10 +99,6 @@ if WIRE_SNAPSHOT_HZ <= 0:
     WIRE_SNAPSHOT_HZ = 1
 if WIRE_MAX_FRAME_BYTES < 256:
     WIRE_MAX_FRAME_BYTES = 256
-if WIRE_PROTOCOL not in ("json", "binary"):
-    WIRE_PROTOCOL = "json"
-
-
 def _read_first_line(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -277,7 +254,8 @@ def _encode_event_payload(obj: dict) -> bytes:
     ])
 
 
-def _encode_snapshot_payload(obj: dict) -> bytes:
+def _encode_rich_snapshot_payload(obj: dict) -> bytes:
+    """Encode kind=4 rich_proc_snapshot: adds cpu_ticks (uint64) and vm_rss_kb (uint32) per row."""
     ts_s = int(obj.get("ts_s", 0) or 0)
     ts_ms = int(obj.get("ts_ms", 0) or 0)
     rows = obj.get("processes", [])
@@ -291,13 +269,49 @@ def _encode_snapshot_payload(obj: dict) -> bytes:
         if not isinstance(row, dict):
             continue
         chunks.append(struct.pack(
-            "!iiiH",
+            "!iiiHQI",
             int(row.get("pid", 0) or 0),
             int(row.get("ppid", 0) or 0),
             int(row.get("uid", 0) or 0),
             int(row.get("threads", 0) or 0),
+            int(row.get("cpu_ticks", 0) or 0),
+            int(row.get("vm_rss_kb", 0) or 0),
         ))
         chunks.append(_pack_str(row.get("comm", "")))
+
+    return b"".join(chunks)
+
+
+def _encode_system_perf_payload(obj: dict) -> bytes:
+    """Encode kind=5 system_perf: per-core CPU ticks, RAM 4-tuple, load avg 3-tuple."""
+    ts_s = int(obj.get("ts_s", 0) or 0)
+    ts_ms = int(obj.get("ts_ms", 0) or 0)
+    cores = obj.get("cores", [])
+    if not isinstance(cores, list):
+        cores = []
+    num_cores = min(len(cores), 255)
+
+    mem = obj.get("mem", [0, 0, 0, 0])
+    load = obj.get("load", [0.0, 0.0, 0.0])
+
+    chunks = [struct.pack("!qHBx", ts_s, ts_ms, num_cores)]
+    for core in cores[:num_cores]:
+        if not isinstance(core, list) or len(core) < 7:
+            core = [0] * 7
+        chunks.append(struct.pack("!7Q", *[int(v) for v in core[:7]]))
+
+    chunks.append(struct.pack("!4Q",
+        int(mem[0]) if len(mem) > 0 else 0,
+        int(mem[1]) if len(mem) > 1 else 0,
+        int(mem[2]) if len(mem) > 2 else 0,
+        int(mem[3]) if len(mem) > 3 else 0,
+    ))
+    # load avg stored as fixed-point x100, clamped to uint16 max (655.35)
+    chunks.append(struct.pack("!3H",
+        min(int(float(load[0] if len(load) > 0 else 0) * 100), 65535),
+        min(int(float(load[1] if len(load) > 1 else 0) * 100), 65535),
+        min(int(float(load[2] if len(load) > 2 else 0) * 100), 65535),
+    ))
 
     return b"".join(chunks)
 
@@ -429,6 +443,7 @@ cdef dict collect_process_snapshot():
     cdef bint got_ppid
     cdef bint got_uid
     cdef bint got_threads
+    cdef bint got_vmrss
 
     for entry in os.scandir("/proc"):
         if not entry.name.isdigit() or not entry.is_dir(follow_symlinks=False):
@@ -436,16 +451,20 @@ cdef dict collect_process_snapshot():
 
         pid = int(entry.name)
         status_path = f"/proc/{entry.name}/status"
+        stat_path = f"/proc/{entry.name}/stat"
         try:
             ppid = 0
             uid = 0
             comm = ""
             threads = 0
+            vm_rss_kb = 0
+            cpu_ticks = 0
             found = 0
             got_name = False
             got_ppid = False
             got_uid = False
             got_threads = False
+            got_vmrss = False
             with open(status_path, "r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     if (not got_name) and line.startswith("Name:\t"):
@@ -464,9 +483,28 @@ cdef dict collect_process_snapshot():
                         threads = int(line.split("\t", 1)[1].strip() or 0)
                         got_threads = True
                         found += 1
+                    elif (not got_vmrss) and line.startswith("VmRSS:\t"):
+                        vm_rss_kb = int(line.split("\t", 1)[1].split()[0])
+                        got_vmrss = True
+                        found += 1
 
-                    if found >= 4:
+                    if found >= 5:
                         break
+
+            # /proc/<pid>/stat: field 14 = utime, field 15 = stime (1-indexed)
+            try:
+                with open(stat_path, "r", encoding="utf-8", errors="replace") as sf:
+                    stat_line = sf.readline()
+                # find the closing ')' of the comm field, then split the rest
+                rp = stat_line.rfind(")")
+                if rp != -1:
+                    stat_fields = stat_line[rp + 2:].split()
+                    # fields after ')' are 0-indexed; utime=11, stime=12 in that slice
+                    if len(stat_fields) > 12:
+                        cpu_ticks = int(stat_fields[11]) + int(stat_fields[12])
+            except (FileNotFoundError, ProcessLookupError, PermissionError,
+                    OSError, ValueError, IndexError):
+                cpu_ticks = 0
 
             processes.append({
                 "pid": pid,
@@ -474,17 +512,87 @@ cdef dict collect_process_snapshot():
                 "uid": uid,
                 "comm": comm,
                 "threads": threads,
+                "vm_rss_kb": vm_rss_kb,
+                "cpu_ticks": cpu_ticks,
             })
         except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError):
             # Process exited (or became unreadable) while being sampled.
             continue
 
     return {
-        "kind": "proc_snapshot",
+        "kind": "rich_proc_snapshot",
         "ts_s": ts_s,
         "ts_ms": ts_ms,
         "processes": processes,
     }
+
+
+def collect_system_perf() -> dict:
+    """Collect system-wide CPU, RAM, and load-average data from /proc."""
+    now = time.time()
+    ts_s = int(now)
+    ts_ms = int((now - ts_s) * 1000)
+
+    # Per-core CPU ticks from /proc/stat
+    cores = []
+    try:
+        with open("/proc/stat", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.startswith("cpu"):
+                    continue
+                # skip the aggregate "cpu " line (no digit after "cpu")
+                parts = line.split()
+                if len(parts) < 8 or not parts[0][3:].isdigit():
+                    continue
+                # user, nice, system, idle, iowait, irq, softirq
+                cores.append([int(parts[i]) for i in range(1, 8)])
+    except OSError:
+        pass
+
+    # RAM from /proc/meminfo
+    mem_fields = {"MemTotal": 0, "MemFree": 0, "MemAvailable": 0, "Cached": 0}
+    found_mem = 0
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                key = line.split(":")[0]
+                if key in mem_fields:
+                    mem_fields[key] = int(line.split()[1])
+                    found_mem += 1
+                    if found_mem >= 4:
+                        break
+    except OSError:
+        pass
+    mem = [
+        mem_fields["MemTotal"],
+        mem_fields["MemFree"],
+        mem_fields["MemAvailable"],
+        mem_fields["Cached"],
+    ]
+
+    # Load average from /proc/loadavg
+    load = [0.0, 0.0, 0.0]
+    try:
+        with open("/proc/loadavg", "r", encoding="utf-8") as fh:
+            parts = fh.read().split()
+            if len(parts) >= 3:
+                load = [float(parts[0]), float(parts[1]), float(parts[2])]
+    except OSError:
+        pass
+
+    return {
+        "kind": "system_perf",
+        "ts_s": ts_s,
+        "ts_ms": ts_ms,
+        "cores": cores,
+        "mem": mem,
+        "load": load,
+    }
+
+
+def collect_all_snapshots() -> list:
+    """Return both rich_proc_snapshot and system_perf as a list for the snapshot worker."""
+    return [collect_process_snapshot(), collect_system_perf()]
 
 
 def _queue_put_drop_oldest(q: object, item: object):
@@ -564,42 +672,38 @@ cdef class Sender:
         if self._sock is None:
             return False
 
-        if WIRE_PROTOCOL == "binary":
-            frames = []
-            for obj in payloads:
-                if not isinstance(obj, dict):
-                    continue
+        frames = []
+        for obj in payloads:
+            if not isinstance(obj, dict):
+                continue
 
-                if obj.get("kind") == "system_info":
-                    kind = WIRE_KIND_SYSTEM_INFO
-                    bin_payload = _encode_system_info_payload(obj)
-                elif obj.get("kind") == "proc_snapshot":
-                    kind = WIRE_KIND_PROC_SNAPSHOT
-                    bin_payload = _encode_snapshot_payload(obj)
-                else:
-                    kind = WIRE_KIND_EVENT
-                    bin_payload = _encode_event_payload(obj)
+            if obj.get("kind") == "system_info":
+                kind = WIRE_KIND_SYSTEM_INFO
+                bin_payload = _encode_system_info_payload(obj)
+            elif obj.get("kind") == "rich_proc_snapshot":
+                kind = WIRE_KIND_RICH_PROC_SNAPSHOT
+                bin_payload = _encode_rich_snapshot_payload(obj)
+            elif obj.get("kind") == "system_perf":
+                kind = WIRE_KIND_SYSTEM_PERF
+                bin_payload = _encode_system_perf_payload(obj)
+            else:
+                kind = WIRE_KIND_EVENT
+                bin_payload = _encode_event_payload(obj)
 
-                if len(bin_payload) > WIRE_MAX_FRAME_BYTES:
-                    dropped_frames += 1
-                    continue
+            if len(bin_payload) > WIRE_MAX_FRAME_BYTES:
+                dropped_frames += 1
+                continue
 
-                frames.append(_encode_frame(kind, bin_payload))
+            frames.append(_encode_frame(kind, bin_payload))
 
-            if dropped_frames:
-                print(f"[under-seer] dropped {dropped_frames} oversized frame(s)",
-                      flush=True)
+        if dropped_frames:
+            print(f"[under-seer] dropped {dropped_frames} oversized frame(s)",
+                  flush=True)
 
-            if not frames:
-                return True
+        if not frames:
+            return True
 
-            data = b"".join(frames)
-        else:
-            payload = "\n".join(
-                json.dumps(e, separators=(",", ":"), ensure_ascii=False)
-                for e in payloads
-            ) + "\n"
-            data = payload.encode("utf-8")
+        data = b"".join(frames)
 
         try:
             self._sock.sendall(data)
@@ -640,7 +744,7 @@ cpdef main():
           f"{poll_interval * 1000:.0f}ms", flush=True)
     print(f"[under-seer] process snapshots every "
           f"{snapshot_interval:.2f}s", flush=True)
-    print(f"[under-seer] wire protocol mode: {WIRE_PROTOCOL}", flush=True)
+    print(f"[under-seer] wire protocol version: {WIRE_VERSION}", flush=True)
     print("[under-seer] threading enabled: event-reader, snapshot-worker, sender",
           flush=True)
 
@@ -668,7 +772,7 @@ cpdef main():
             snapshot_queue,
             stop_event,
             snapshot_interval,
-            collect_process_snapshot,
+            collect_all_snapshots,
             _queue_put_drop_oldest,
         ),
         daemon=True,

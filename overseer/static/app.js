@@ -8,7 +8,8 @@
  *
  * Payload schemas:
  *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2}
- *   Process snapshots: {kind: "proc_snapshot", ts_s, ts_ms, processes: [...]}
+ *   Process snapshots: {kind: "rich_proc_snapshot", ts_s, ts_ms, processes: [...]}
+ *   System perf: {kind: "system_perf", ts_s, ts_ms, cores, mem, load}
  */
 
 "use strict";
@@ -398,6 +399,8 @@ function applyProcessSnapshot(snapshot) {
       uid: Number(row.uid ?? 0),
       comm: row.comm ?? "",
       threads: Number(row.threads ?? 0),
+      cpu_pct: Number(row.cpu_pct ?? 0),
+      vm_rss_kb: Number(row.vm_rss_kb ?? 0),
       last_seen_s: Number(snapshot.ts_s ?? 0),
       last_seen_ms: Number(snapshot.ts_ms ?? 0),
     };
@@ -428,6 +431,8 @@ function renderProcs() {
       <td>${p.uid}</td>
       <td>${esc(p.comm)}</td>
       <td>${p.threads ?? 0}</td>
+      <td>${fmtCpuPct(p.cpu_pct)}</td>
+      <td>${fmtRssKb(p.vm_rss_kb)}</td>
       <td>${fmtEventTs(p.last_seen_s, p.last_seen_ms, 3)}</td>
     `;
     fragment.appendChild(tr);
@@ -443,6 +448,45 @@ setInterval(() => {
     procDirty = false;
   }
 }, 1000);
+
+async function refreshProcessesFromApi() {
+  if (!(hasProcTable || hasLifecycleFeed || hasDeadProcessesFeed)) return;
+
+  try {
+    const procs = await fetch("/api/processes").then((r) => r.json());
+    if (!Array.isArray(procs)) return;
+
+    Object.keys(procMap).forEach((pid) => {
+      delete procMap[pid];
+    });
+
+    procs.forEach((p) => {
+      const pid = Number(p.pid);
+      if (!Number.isFinite(pid) || pid <= 0) return;
+      procMap[pid] = {
+        pid,
+        ppid: Number(p.ppid ?? 0),
+        uid: Number(p.uid ?? 0),
+        comm: p.comm ?? "",
+        threads: Number(p.threads ?? 0),
+        cpu_pct: Number(p.cpu_pct ?? 0),
+        vm_rss_kb: Number(p.vm_rss_kb ?? 0),
+        last_seen_s: Number(p.last_seen_s ?? 0),
+        last_seen_ms: Number(p.last_seen_ms ?? 0),
+      };
+    });
+
+    procDirty = true;
+  } catch (_) {
+    // keep existing table contents if refresh fails
+  }
+}
+
+if (hasProcTable || hasLifecycleFeed || hasDeadProcessesFeed) {
+  setInterval(() => {
+    refreshProcessesFromApi();
+  }, 2000);
+}
 
 // --- Feed tables -------------------------------------------------------------
 
@@ -466,6 +510,8 @@ function prependFeedRow(tbodyId, ev) {
 
 function packetType(ev) {
   if (ev?.kind === "proc_snapshot") return "proc_snapshot";
+  if (ev?.kind === "rich_proc_snapshot") return "rich_proc_snapshot";
+  if (ev?.kind === "system_perf") return "system_perf";
   if (typeof ev?.type === "string" && ev.type) return ev.type;
   if (typeof ev?.kind === "string" && ev.kind) return ev.kind;
   return "unknown";
@@ -476,6 +522,12 @@ function packetArg1(ev) {
   if (ev?.arg != null) return ev.arg;
   if (ev?.kind === "proc_snapshot" && Array.isArray(ev?.processes)) {
     return `processes=${ev.processes.length}`;
+  }
+  if (ev?.kind === "rich_proc_snapshot" && Array.isArray(ev?.processes)) {
+    return `processes=${ev.processes.length}`;
+  }
+  if (ev?.kind === "system_perf" && Array.isArray(ev?.cores)) {
+    return `cores=${ev.cores.length}`;
   }
   return "";
 }
@@ -560,7 +612,20 @@ function boolToYesNo(value) {
   return value ? "yes" : "no";
 }
 
+function fmtCpuPct(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "0.00%";
+  return `${n.toFixed(2)}%`;
+}
+
+function fmtRssKb(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return "0 KiB";
+  return `${n.toLocaleString("en-US")} KiB`;
+}
+
 function processDetailsMarkup(row) {
+  const liveProc = procMap[row.pid] || {};
   const details = [
     ["Start", fmtEventTs(row.start_ts_s, row.start_ts_ms, 3)],
     ["Last", fmtEventTs(row.last_ts_s, row.last_ts_ms, 3)],
@@ -569,6 +634,8 @@ function processDetailsMarkup(row) {
     ["UID", row.uid ?? ""],
     ["Comm", row.comm ?? ""],
     ["Exec", row.exec_arg ?? ""],
+    ["CPU", fmtCpuPct(row.cpu_pct ?? liveProc.cpu_pct)],
+    ["RSS", fmtRssKb(row.vm_rss_kb ?? liveProc.vm_rss_kb)],
     ["Running", boolToYesNo(row.running)],
     ["Opens", row.open_count ?? 0],
     ["Connections", row.connect_count ?? 0],
@@ -736,6 +803,7 @@ function renderLifecycleRows(rows) {
 
   const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
+    const liveProc = procMap[row.pid] || {};
     const tr = document.createElement("tr");
     bindProcessHoverRow(tr, row, "lifecycle");
     tr.innerHTML = `
@@ -746,11 +814,8 @@ function renderLifecycleRows(rows) {
       <td>${esc(row.uid ?? "")}</td>
       <td>${esc(row.comm ?? "")}</td>
       <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
-      <!--<td>${row.running ? "yes" : "no"}</td>
-      <td>${esc(row.open_count ?? 0)}</td>
-      <td>${esc(row.connect_count ?? 0)}</td>
-      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
-      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
+      <td>${fmtCpuPct(row.cpu_pct ?? liveProc.cpu_pct)}</td>
+      <td>${fmtRssKb(row.vm_rss_kb ?? liveProc.vm_rss_kb)}</td>
     `;
     fragment.appendChild(tr);
   });
@@ -764,6 +829,7 @@ function renderDeadProcessesRows(rows) {
 
   const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
+    const liveProc = procMap[row.pid] || {};
     const tr = document.createElement("tr");
     bindProcessHoverRow(tr, row, "dead-processes");
     tr.innerHTML = `
@@ -774,11 +840,8 @@ function renderDeadProcessesRows(rows) {
       <td>${esc(row.uid ?? "")}</td>
       <td>${esc(row.comm ?? "")}</td>
       <td class="arg-cell">${esc(row.exec_arg ?? "")}</td>
-      <!--<td>${row.running ? "yes" : "no"}</td>
-      <td>${esc(row.open_count ?? 0)}</td>
-      <td>${esc(row.connect_count ?? 0)}</td>
-      <td class="arg-cell">${esc(row.first_open ?? "")}</td>
-      <td class="arg-cell">${esc(row.first_connect ?? "")}</td>-->
+      <td>${fmtCpuPct(row.cpu_pct ?? liveProc.cpu_pct)}</td>
+      <td>${fmtRssKb(row.vm_rss_kb ?? liveProc.vm_rss_kb)}</td>
     `;
     fragment.appendChild(tr);
   });
@@ -904,9 +967,31 @@ function initDeadProcessesControls() {
 }
 
 function ingestEvent(ev) {
-  if (hasProcTable && ev?.kind === "proc_snapshot") {
-    applyProcessSnapshot(ev);
-    if (hasSyscallsFeed) prependEventRow(ev);
+  if (!ev || typeof ev !== "object") {
+    return;
+  }
+
+  if (ev.kind === "rich_proc_snapshot" || ev.kind === "proc_snapshot") {
+    if (hasProcTable || hasLifecycleFeed || hasDeadProcessesFeed) {
+      applyProcessSnapshot(ev);
+    }
+    if (hasLifecycleFeed) {
+      scheduleLifecycleRefresh();
+    }
+    if (hasDeadProcessesFeed) {
+      scheduleDeadProcessesRefresh();
+    }
+    return;
+  }
+
+  // System performance frames are consumed via /api/system-perf and do not
+  // belong in syscall-oriented tables.
+  if (ev.kind === "system_perf") {
+    return;
+  }
+
+  // Ignore non-syscall payloads that lack a concrete syscall type.
+  if (typeof ev.type !== "string" || !ev.type) {
     return;
   }
 
@@ -914,10 +999,10 @@ function ingestEvent(ev) {
   if (hasNetworkFeed && ev.type === "connect") prependFeedRow("net-body", ev);
   if (hasForkFeed && ev.type === "fork") prependForkRow(ev);
   if (hasForkExecFeed && (ev.type === "fork" || ev.type === "execve")) prependForkExecRow(ev);
-  if (hasLifecycleFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+  if (hasLifecycleFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect")) {
     scheduleLifecycleRefresh();
   }
-  if (hasDeadProcessesFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect" || ev.kind === "proc_snapshot")) {
+  if (hasDeadProcessesFeed && (ev.type === "fork" || ev.type === "execve" || ev.type === "open" || ev.type === "connect")) {
     scheduleDeadProcessesRefresh();
   }
   if (hasSyscallsFeed) prependEventRow(ev);
@@ -928,13 +1013,25 @@ function ingestEvent(ev) {
 async function loadSnapshot() {
   const tasks = [];
 
-  if (hasProcTable) {
+  if (hasProcTable || hasLifecycleFeed || hasDeadProcessesFeed) {
     tasks.push(
       fetch("/api/processes")
         .then((r) => r.json())
         .then((procs) => {
           procs.forEach((p) => {
-            procMap[p.pid] = p;
+            const pid = Number(p.pid);
+            if (!Number.isFinite(pid) || pid <= 0) return;
+            procMap[pid] = {
+              pid,
+              ppid: Number(p.ppid ?? 0),
+              uid: Number(p.uid ?? 0),
+              comm: p.comm ?? "",
+              threads: Number(p.threads ?? 0),
+              cpu_pct: Number(p.cpu_pct ?? 0),
+              vm_rss_kb: Number(p.vm_rss_kb ?? 0),
+              last_seen_s: Number(p.last_seen_s ?? 0),
+              last_seen_ms: Number(p.last_seen_ms ?? 0),
+            };
           });
           procDirty = true;
         })

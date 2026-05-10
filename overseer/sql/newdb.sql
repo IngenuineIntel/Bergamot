@@ -68,3 +68,21 @@ CREATE TABLE procs (
 
 CREATE INDEX idx_procs_pid ON procs(pid);
 CREATE INDEX idx_procs_active ON procs(pid, ended_ts_s);
+
+CREATE TABLE system_perf (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_s INTEGER NOT NULL,
+    ts_ms INTEGER NOT NULL,
+    core_count INTEGER NOT NULL,
+    avg_cpu_pct REAL NOT NULL,
+    mem_total_kb INTEGER NOT NULL,
+    mem_free_kb INTEGER NOT NULL,
+    mem_available_kb INTEGER NOT NULL,
+    mem_cached_kb INTEGER NOT NULL,
+    load_1m REAL NOT NULL,
+    load_5m REAL NOT NULL,
+    load_15m REAL NOT NULL,
+    cores_json TEXT NOT NULL
+);
+
+CREATE INDEX idx_system_perf_ts ON system_perf(ts_s, ts_ms);

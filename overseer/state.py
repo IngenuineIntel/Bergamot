@@ -21,6 +21,7 @@ import os
 import sqlite3
 import threading
 import time
+import json
 from collections import deque
 
 
@@ -69,6 +70,7 @@ class EventStore:
         self._db_path: str | None = None
         self._db_insert_event_sql: str | None = None
         self._db_insert_proc_sql: str | None = None
+        self._db_insert_system_perf_sql: str | None = None
         self._db_update_proc_seen_sql: str | None = None
         self._db_update_proc_end_sql: str | None = None
         self._pending_writes: int = 0
@@ -84,6 +86,15 @@ class EventStore:
         # _dead_lifecycle_rows so they remain visible even when recent_events rolls
         self._active_lifecycle_rows: dict[int, dict] = {}
         self._dead_lifecycle_rows: deque = deque()
+
+        # system performance telemetry (kind=5 frames)
+        self.system_perf: dict | None = None
+        # raw per-core tick vectors from previous system_perf frame
+        self._prev_core_ticks: list[list[int]] | None = None
+        # raw cpu_ticks (utime+stime) per PID from previous rich_proc_snapshot
+        self._prev_proc_cpu_ticks: dict[int, int] = {}
+        # monotonic timestamp of last rich_proc_snapshot (for tick delta calc)
+        self._prev_proc_snap_mono: float | None = None
 
     # ── Persistence setup / teardown ───────────────────────────────────────
 
@@ -115,6 +126,7 @@ class EventStore:
             newdb_path = os.path.join(sql_dir, "newdb.sql")
             evententry_path = os.path.join(sql_dir, "evententry.sql")
             procentry_path = os.path.join(sql_dir, "procentry.sql")
+            systemperfentry_path = os.path.join(sql_dir, "systemperfentry.sql")
 
             with open(newdb_path, "r", encoding="utf-8") as f:
                 newdb_sql = f.read()
@@ -129,6 +141,9 @@ class EventStore:
 
             with open(evententry_path, "r", encoding="utf-8") as f:
                 self._db_insert_event_sql = f.read().strip()
+
+            with open(systemperfentry_path, "r", encoding="utf-8") as f:
+                self._db_insert_system_perf_sql = f.read().strip()
 
             with open(procentry_path, "r", encoding="utf-8") as f:
                 proc_sql_chunks = [chunk.strip() for chunk in f.read().split(";") if chunk.strip()]
@@ -185,6 +200,7 @@ class EventStore:
         self._db_conn = None
         self._db_insert_event_sql = None
         self._db_insert_proc_sql = None
+        self._db_insert_system_perf_sql = None
         self._db_update_proc_seen_sql = None
         self._db_update_proc_end_sql = None
         self._db_path = None
@@ -232,6 +248,8 @@ class EventStore:
             "connect_count": 0,
             "first_open": "",
             "first_connect": "",
+            "cpu_pct": 0.0,
+            "vm_rss_kb": 0,
             "start_ts_s": ts_s,
             "start_ts_ms": ts_ms,
             "last_ts_s": ts_s,
@@ -357,6 +375,10 @@ class EventStore:
                     row["last_ts_s"] = ts_s
                     row["last_ts_ms"] = ts_ms
 
+            # Carry latest process metrics into lifecycle/dead-process rows.
+            row["cpu_pct"] = float(proc.get("cpu_pct", row.get("cpu_pct", 0.0)) or 0.0)
+            row["vm_rss_kb"] = int(proc.get("vm_rss_kb", row.get("vm_rss_kb", 0)) or 0)
+
     def _db_write_failed(self, op_name: str, exc: Exception):
         print(f"[over-seer] db write failed during {op_name}: {exc}", flush=True)
 
@@ -479,13 +501,48 @@ class EventStore:
 
         self._flush_commits_locked(force=False)
 
+    def _persist_system_perf_locked(self, perf: dict):
+        if self._db_conn is None or not self._db_insert_system_perf_sql:
+            return
+
+        cores = perf.get("cores", [])
+        cpu_values = [c.get("cpu_pct") for c in cores if isinstance(c, dict) and c.get("cpu_pct") is not None]
+        avg_cpu_pct = round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else 0.0
+        mem = perf.get("mem", {}) if isinstance(perf.get("mem", {}), dict) else {}
+        load = perf.get("load", {}) if isinstance(perf.get("load", {}), dict) else {}
+
+        params = {
+            "ts_s": int(perf.get("ts_s", 0) or 0),
+            "ts_ms": int(perf.get("ts_ms", 0) or 0),
+            "core_count": int(len(cores)),
+            "avg_cpu_pct": float(avg_cpu_pct),
+            "mem_total_kb": int(mem.get("total_kb", 0) or 0),
+            "mem_free_kb": int(mem.get("free_kb", 0) or 0),
+            "mem_available_kb": int(mem.get("available_kb", 0) or 0),
+            "mem_cached_kb": int(mem.get("cached_kb", 0) or 0),
+            "load_1m": float(load.get("l1", 0.0) or 0.0),
+            "load_5m": float(load.get("l5", 0.0) or 0.0),
+            "load_15m": float(load.get("l15", 0.0) or 0.0),
+            "cores_json": json.dumps(cores, separators=(",", ":")),
+        }
+
+        try:
+            self._db_conn.execute(self._db_insert_system_perf_sql, params)
+            self._pending_writes += 1
+            self._flush_commits_locked(force=False)
+        except sqlite3.Error as exc:
+            self._db_write_failed("system_perf insert", exc)
+
     # ── Ingest ───────────────────────────────────────────────────────────────
 
     def add_event(self, ev: dict):
         """Ingest event ."""
         with self._lock:
-            if ev.get("kind") == "proc_snapshot":
+            if ev.get("kind") == "rich_proc_snapshot":
                 self._apply_process_snapshot_locked(ev)
+                return
+            if ev.get("kind") == "system_perf":
+                self._apply_system_perf_locked(ev)
                 return
 
             ev = self._normalize_event_payload(ev)
@@ -603,6 +660,31 @@ class EventStore:
                 "last_seen_s": ts_s,
                 "last_seen_ms": ts_ms,
             }
+            # rich_proc_snapshot extra fields
+            new_cpu_ticks = int(row.get("cpu_ticks", 0) or 0)
+            vm_rss_kb = int(row.get("vm_rss_kb", 0) or 0)
+            new_processes[pid]["vm_rss_kb"] = vm_rss_kb
+            new_processes[pid]["cpu_ticks"] = new_cpu_ticks
+
+        # Compute per-process CPU% from tick delta if we have a previous snapshot.
+        now_mono = time.monotonic()
+        prev_mono = self._prev_proc_snap_mono
+        if prev_mono is not None and prev_mono > 0:
+            elapsed = now_mono - prev_mono
+            # Approximate clock ticks per second (USER_HZ = 100 on Linux)
+            hz = 100.0
+            elapsed_ticks = elapsed * hz
+            if elapsed_ticks > 0:
+                for pid, proc in new_processes.items():
+                    prev_ticks = self._prev_proc_cpu_ticks.get(pid, 0)
+                    delta = max(0, proc.get("cpu_ticks", 0) - prev_ticks)
+                    proc["cpu_pct"] = round(min(delta / elapsed_ticks * 100.0, 6400.0), 2)
+
+        # Update tick history for next delta computation.
+        self._prev_proc_cpu_ticks = {
+            pid: proc.get("cpu_ticks", 0) for pid, proc in new_processes.items()
+        }
+        self._prev_proc_snap_mono = now_mono
 
         self.processes = new_processes
         self._mark_lifecycle_rows_from_snapshot_locked(ts_s, ts_ms, old_processes, new_processes)
@@ -737,6 +819,69 @@ class EventStore:
                 "arg": row[9] or "",
             })
         return out
+
+    def _apply_system_perf_locked(self, perf: dict):
+        """Compute per-core CPU% from tick deltas and store latest system_perf."""
+        raw_cores = perf.get("cores", [])
+        new_tick_vecs = []
+        for c in raw_cores:
+            if isinstance(c, dict):
+                new_tick_vecs.append([
+                    int(c.get("user", 0) or 0),
+                    int(c.get("nice", 0) or 0),
+                    int(c.get("system", 0) or 0),
+                    int(c.get("idle", 0) or 0),
+                    int(c.get("iowait", 0) or 0),
+                    int(c.get("irq", 0) or 0),
+                    int(c.get("softirq", 0) or 0),
+                ])
+            elif isinstance(c, list) and len(c) >= 7:
+                new_tick_vecs.append([int(v) for v in c[:7]])
+            else:
+                new_tick_vecs.append([0] * 7)
+
+        cores_out = []
+        prev = self._prev_core_ticks
+        for i, new_vec in enumerate(new_tick_vecs):
+            user, nice, system, idle, iowait, irq, softirq = new_vec
+            cpu_pct = None
+            if prev is not None and i < len(prev):
+                old_vec = prev[i]
+                delta_user = max(0, user - old_vec[0])
+                delta_nice = max(0, nice - old_vec[1])
+                delta_system = max(0, system - old_vec[2])
+                delta_idle = max(0, idle - old_vec[3])
+                delta_iowait = max(0, iowait - old_vec[4])
+                delta_irq = max(0, irq - old_vec[5])
+                delta_softirq = max(0, softirq - old_vec[6])
+                delta_busy = delta_user + delta_nice + delta_system + delta_irq + delta_softirq
+                delta_total = delta_busy + delta_idle + delta_iowait
+                cpu_pct = round(delta_busy / delta_total * 100.0, 2) if delta_total > 0 else 0.0
+            cores_out.append({
+                "user": user,
+                "nice": nice,
+                "system": system,
+                "idle": idle,
+                "iowait": iowait,
+                "irq": irq,
+                "softirq": softirq,
+                "cpu_pct": cpu_pct,
+            })
+
+        self._prev_core_ticks = new_tick_vecs
+        self.system_perf = {
+            "kind": "system_perf",
+            "ts_s": int(perf.get("ts_s", 0) or 0),
+            "ts_ms": int(perf.get("ts_ms", 0) or 0),
+            "cores": cores_out,
+            "mem": perf.get("mem", {}),
+            "load": perf.get("load", {}),
+        }
+        self._persist_system_perf_locked(self.system_perf)
+
+    def get_system_perf(self) -> dict:
+        with self._lock:
+            return self.system_perf or {}
 
     def get_overview(self) -> dict | None:
         with self._lock:

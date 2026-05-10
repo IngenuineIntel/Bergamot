@@ -2,30 +2,21 @@
 server.py — Over-Seer TCP ingest endpoint for Under-Seer agents.
 
 Inbound contract:
-    Under-Seer sends NDJSON over TCP, one JSON object per newline.
+    Under-Seer sends binary framed telemetry over TCP (BGW1 / version 1).
 
 This module:
     - accepts agent connections
-    - reassembles newline frames
-    - decodes JSON dict events
-    - forwards each event to state.store.add_event()
-
-Integration note:
-    app.py wraps store.add_event() to fan out live events to SSE clients,
-    so each ingest here updates both in-memory state and browser streams.
+    - reassembles framed binary messages
+    - decodes messages into event dictionaries
+    - forwards each message to state.store.add_event()
 
 Handshake contract:
-    The first JSON object on each TCP connection must be:
+    The first message on each TCP connection must be:
         {"kind": "system_info", ...}
     Over-Seer uses that payload to initialize the session database before
-    accepting any event or proc_snapshot messages.
-
-Start this before (or alongside) the Flask app:
-    from server import start_tcp_server
-    start_tcp_server()
+    accepting telemetry messages.
 """
 
-import json
 import os
 import socket
 import struct
@@ -37,11 +28,12 @@ from state import store
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 12046          # override via environment in app.py if desired
 
-WIRE_MAGIC = b"BGW2"
-WIRE_VERSION = 2
+WIRE_MAGIC = b"BGW1"
+WIRE_VERSION = 1
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
-WIRE_KIND_PROC_SNAPSHOT = 3
+WIRE_KIND_RICH_PROC_SNAPSHOT = 4
+WIRE_KIND_SYSTEM_PERF = 5
 WIRE_FLAG_CHECKSUM = 0x01
 WIRE_ALLOWED_FLAGS = WIRE_FLAG_CHECKSUM
 try:
@@ -141,19 +133,21 @@ def _decode_event(payload: bytes):
     }
 
 
-def _decode_proc_snapshot(payload: bytes):
+def _decode_rich_proc_snapshot(payload: bytes):
     header_sz = struct.calcsize("!qHH")
     if len(payload) < header_sz:
-        raise ValueError("short snapshot header")
+        raise ValueError("short rich snapshot header")
     ts_s, ts_ms, count = struct.unpack("!qHH", payload[:header_sz])
     pos = header_sz
     rows = []
 
+    row_sz = struct.calcsize("!iiiHQI")
     for _ in range(count):
-        row_sz = struct.calcsize("!iiiH")
         if pos + row_sz > len(payload):
-            raise ValueError("short snapshot row")
-        pid, ppid, uid, threads = struct.unpack("!iiiH", payload[pos:pos + row_sz])
+            raise ValueError("short rich snapshot row")
+        pid, ppid, uid, threads, cpu_ticks, vm_rss_kb = struct.unpack(
+            "!iiiHQI", payload[pos:pos + row_sz]
+        )
         pos += row_sz
         comm, pos = _read_str(payload, pos)
         rows.append({
@@ -162,13 +156,66 @@ def _decode_proc_snapshot(payload: bytes):
             "uid": int(uid),
             "comm": comm,
             "threads": int(threads),
+            "cpu_ticks": int(cpu_ticks),
+            "vm_rss_kb": int(vm_rss_kb),
         })
 
     return {
-        "kind": "proc_snapshot",
+        "kind": "rich_proc_snapshot",
         "ts_s": int(ts_s),
         "ts_ms": int(ts_ms),
         "processes": rows,
+    }
+
+
+def _decode_system_perf(payload: bytes):
+    header_sz = struct.calcsize("!qHBx")
+    if len(payload) < header_sz:
+        raise ValueError("short system_perf header")
+    ts_s, ts_ms, num_cores = struct.unpack("!qHBx", payload[:header_sz])
+    pos = header_sz
+
+    core_sz = struct.calcsize("!7Q")
+    cores = []
+    for _ in range(num_cores):
+        if pos + core_sz > len(payload):
+            raise ValueError("short system_perf core block")
+        vals = struct.unpack("!7Q", payload[pos:pos + core_sz])
+        cores.append({
+            "user": vals[0], "nice": vals[1], "system": vals[2],
+            "idle": vals[3], "iowait": vals[4], "irq": vals[5], "softirq": vals[6],
+        })
+        pos += core_sz
+
+    mem_sz = struct.calcsize("!4Q")
+    if pos + mem_sz > len(payload):
+        raise ValueError("short system_perf mem block")
+    mem_total, mem_free, mem_available, mem_cached = struct.unpack(
+        "!4Q", payload[pos:pos + mem_sz]
+    )
+    pos += mem_sz
+
+    load_sz = struct.calcsize("!3H")
+    if pos + load_sz > len(payload):
+        raise ValueError("short system_perf load block")
+    l1_fp, l5_fp, l15_fp = struct.unpack("!3H", payload[pos:pos + load_sz])
+
+    return {
+        "kind": "system_perf",
+        "ts_s": int(ts_s),
+        "ts_ms": int(ts_ms),
+        "cores": cores,
+        "mem": {
+            "total_kb": int(mem_total),
+            "free_kb": int(mem_free),
+            "available_kb": int(mem_available),
+            "cached_kb": int(mem_cached),
+        },
+        "load": {
+            "l1": round(l1_fp / 100, 2),
+            "l5": round(l5_fp / 100, 2),
+            "l15": round(l15_fp / 100, 2),
+        },
     }
 
 
@@ -177,8 +224,10 @@ def _decode_binary_frame(kind: int, payload: bytes):
         return _decode_system_info(payload)
     if kind == WIRE_KIND_EVENT:
         return _decode_event(payload)
-    if kind == WIRE_KIND_PROC_SNAPSHOT:
-        return _decode_proc_snapshot(payload)
+    if kind == WIRE_KIND_RICH_PROC_SNAPSHOT:
+        return _decode_rich_proc_snapshot(payload)
+    if kind == WIRE_KIND_SYSTEM_PERF:
+        return _decode_system_perf(payload)
     return None
 
 # TODO this should not be allowing multiple agents, but I'm currently working
@@ -191,7 +240,6 @@ def _handle_client(conn: socket.socket, addr):
         store.is_agent = True
     buf = b""
     handshake_done = False
-    mode = None
     metrics = {
         "frames_rx": 0,
         "bad_magic": 0,
@@ -201,7 +249,6 @@ def _handle_client(conn: socket.socket, addr):
         "bad_checksum": 0,
         "decode_err": 0,
         "unknown_kind": 0,
-        "json_malformed": 0,
     }
 
     try:
@@ -212,110 +259,70 @@ def _handle_client(conn: socket.socket, addr):
 
             buf += chunk
 
-            if mode is None and len(buf) >= 4:
-                if buf[:4] == WIRE_MAGIC:
-                    mode = "binary"
-                else:
-                    mode = "json"
+            header_sz = struct.calcsize("!4sBBBBII")
+            while len(buf) >= header_sz:
+                magic, version, kind, flags, _reserved, payload_len, checksum = struct.unpack(
+                    "!4sBBBBII", buf[:header_sz]
+                )
+                metrics["frames_rx"] += 1
 
-            if mode == "binary":
-                header_sz = struct.calcsize("!4sBBBBII")
-                while len(buf) >= header_sz:
-                    magic, version, kind, flags, _reserved, payload_len, checksum = struct.unpack(
-                        "!4sBBBBII", buf[:header_sz]
-                    )
-                    metrics["frames_rx"] += 1
+                if magic != WIRE_MAGIC:
+                    metrics["bad_magic"] += 1
+                    print(f"[over-seer] protocol error from {addr}: bad magic", flush=True)
+                    return
+                if version != WIRE_VERSION:
+                    metrics["bad_version"] += 1
+                    print(f"[over-seer] protocol error from {addr}: unsupported version {version}", flush=True)
+                    return
+                if flags & ~WIRE_ALLOWED_FLAGS:
+                    metrics["bad_flags"] += 1
+                    print(f"[over-seer] protocol error from {addr}: unknown flags 0x{flags:x}", flush=True)
+                    return
+                if not (flags & WIRE_FLAG_CHECKSUM):
+                    metrics["bad_flags"] += 1
+                    print(f"[over-seer] protocol error from {addr}: missing checksum flag", flush=True)
+                    return
+                if payload_len > WIRE_MAX_FRAME_BYTES:
+                    metrics["oversized"] += 1
+                    print(f"[over-seer] protocol error from {addr}: frame too large ({payload_len})", flush=True)
+                    return
 
-                    if magic != WIRE_MAGIC:
-                        metrics["bad_magic"] += 1
-                        print(f"[over-seer] protocol error from {addr}: bad magic", flush=True)
-                        return
-                    if version != WIRE_VERSION:
-                        metrics["bad_version"] += 1
-                        print(f"[over-seer] protocol error from {addr}: unsupported version {version}", flush=True)
-                        return
-                    if flags & ~WIRE_ALLOWED_FLAGS:
-                        metrics["bad_flags"] += 1
-                        print(f"[over-seer] protocol error from {addr}: unknown flags 0x{flags:x}", flush=True)
-                        return
-                    if not (flags & WIRE_FLAG_CHECKSUM):
-                        metrics["bad_flags"] += 1
-                        print(f"[over-seer] protocol error from {addr}: missing checksum flag", flush=True)
-                        return
-                    if payload_len > WIRE_MAX_FRAME_BYTES:
-                        metrics["oversized"] += 1
-                        print(f"[over-seer] protocol error from {addr}: frame too large ({payload_len})", flush=True)
-                        return
+                total = header_sz + payload_len
+                if len(buf) < total:
+                    break
 
-                    total = header_sz + payload_len
-                    if len(buf) < total:
-                        break
+                payload = buf[header_sz:total]
+                buf = buf[total:]
 
-                    payload = buf[header_sz:total]
-                    buf = buf[total:]
+                calc_sum = zlib.crc32(payload) & 0xFFFFFFFF
+                if checksum != calc_sum:
+                    metrics["bad_checksum"] += 1
+                    print(f"[over-seer] protocol error from {addr}: checksum mismatch", flush=True)
+                    return
 
-                    calc_sum = zlib.crc32(payload) & 0xFFFFFFFF
-                    if checksum != calc_sum:
-                        metrics["bad_checksum"] += 1
-                        print(f"[over-seer] protocol error from {addr}: checksum mismatch", flush=True)
-                        return
-
-                    try:
-                        ev = _decode_binary_frame(kind, payload)
-                        if not isinstance(ev, dict):
-                            metrics["unknown_kind"] += 1
-                            continue
-
-                        if not handshake_done:
-                            if ev.get("kind") != "system_info":
-                                print(f"[over-seer] protocol error from {addr}: first message must be system_info", flush=True)
-                                return
-
-                            initialized, db_path = store.initialize_sqlite_from_handshake(ev)
-                            if initialized and db_path:
-                                print(f"[over-seer] session db initialized at {db_path}", flush=True)
-
-                            handshake_done = True
-                            continue
-
-                        store.add_event(ev)
-                    except Exception as exc:
-                        metrics["decode_err"] += 1
-                        print(f"[over-seer] binary decode failed for {addr}: {exc}", flush=True)
-                        return
-            elif mode == "json":
-                # Process all complete lines in the buffer
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    line = line.strip()
-                    if not line:
+                try:
+                    ev = _decode_binary_frame(kind, payload)
+                    if not isinstance(ev, dict):
+                        metrics["unknown_kind"] += 1
                         continue
-                    try:
-                        ev = json.loads(line.decode("utf-8", errors="replace"))
-                        if not isinstance(ev, dict):
-                            continue
 
-                        if not handshake_done:
-                            if ev.get("kind") != "system_info":
-                                print(f"[over-seer] protocol error from {addr}: first message must be system_info",
-                                      flush=True)
-                                return
+                    if not handshake_done:
+                        if ev.get("kind") != "system_info":
+                            print(f"[over-seer] protocol error from {addr}: first message must be system_info", flush=True)
+                            return
 
-                            initialized, db_path = store.initialize_sqlite_from_handshake(ev)
-                            if initialized and db_path:
-                                print(f"[over-seer] session db initialized at {db_path}", flush=True)
+                        initialized, db_path = store.initialize_sqlite_from_handshake(ev)
+                        if initialized and db_path:
+                            print(f"[over-seer] session db initialized at {db_path}", flush=True)
 
-                            handshake_done = True
-                            continue
+                        handshake_done = True
+                        continue
 
-                        store.add_event(ev)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        metrics["json_malformed"] += 1
-                        pass  # malformed line — skip silently
-                    except Exception as exc:
-                        print(f"[over-seer] connection setup failed for {addr}: {exc}",
-                              flush=True)
-                        return
+                    store.add_event(ev)
+                except Exception as exc:
+                    metrics["decode_err"] += 1
+                    print(f"[over-seer] binary decode failed for {addr}: {exc}", flush=True)
+                    return
     except OSError:
         pass
     finally:
@@ -331,8 +338,7 @@ def _handle_client(conn: socket.socket, addr):
                 f"frames_rx={metrics['frames_rx']} bad_magic={metrics['bad_magic']} "
                 f"bad_version={metrics['bad_version']} bad_flags={metrics['bad_flags']} "
                 f"oversized={metrics['oversized']} bad_checksum={metrics['bad_checksum']} "
-                f"decode_err={metrics['decode_err']} unknown_kind={metrics['unknown_kind']} "
-                f"json_malformed={metrics['json_malformed']}",
+                f"decode_err={metrics['decode_err']} unknown_kind={metrics['unknown_kind']}",
                 flush=True,
             )
         print(f"[over-seer] agent disconnected from {addr}", flush=True)

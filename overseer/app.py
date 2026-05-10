@@ -232,6 +232,13 @@ def api_processes():
     return jsonify(store.get_processes())
 
 
+
+@app.route("/api/system-perf")
+def api_system_perf():
+    """Return the latest system performance snapshot (CPU, RAM, load avg)."""
+    return jsonify(store.get_system_perf())
+
+
 @app.route("/api/file_opens")
 def api_file_opens():
     """Return the last 100 file-open events."""
