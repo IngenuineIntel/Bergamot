@@ -4,6 +4,7 @@ import queue
 import sys
 import time
 
+from logging import l
 
 def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
                      wire_batch_max, parse_line_cb, queue_put_cb):
@@ -15,7 +16,7 @@ def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
         try:
             with open(proc_path, "r") as fh:
                 if not lease_announced:
-                    print(f"[under-seer] {proc_path} access claimed", flush=True)
+                    l.info(f"{proc_path} access claimed", flush=True)
                     lease_announced = True
                 for raw_line in fh:
                     ev = parse_line_cb(raw_line)
@@ -26,13 +27,12 @@ def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
         except PermissionError:
             continue
         except FileNotFoundError:
-            print(f"[under-seer] {proc_path} unavailable — "
-                  "owned by another parent scope or module not loaded",
-                  file=sys.stderr, flush=True)
+            l.critical(f"{proc_path} unavalible")
+            l.debug("either another process has already claimed it, or the module's not loaded", flush=True)
             time.sleep(5)
             continue
         except OSError as exc:
-            print(f"[under-seer] read error: {exc}", flush=True)
+            l.error(f"read failed: {exc}", flush=True)
             continue
 
         if batch:

@@ -5,5 +5,6 @@ setup(
     ext_modules=cythonize([
         "underseer.pyx",
         "underseer_workers.pyx",
+        "logging.pyx"
     ])
 )

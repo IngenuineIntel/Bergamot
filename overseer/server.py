@@ -2,7 +2,7 @@
 server.py — Over-Seer TCP ingest endpoint for Under-Seer agents.
 
 Inbound contract:
-    Under-Seer sends binary framed telemetry over TCP (BGW1 / version 1).
+    Under-Seer sends binary framed telemetry over TCP (BGW1 / version 1.0).
 
 This module:
     - accepts agent connections
@@ -29,7 +29,8 @@ LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 12046          # override via environment in app.py if desired
 
 WIRE_MAGIC = b"BGW1"
-WIRE_VERSION = 1
+WIRE_VERSION = 1          # wire byte; protocol version 1.0
+WIRE_VERSION_STR = "1.0"
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
 WIRE_KIND_RICH_PROC_SNAPSHOT = 4

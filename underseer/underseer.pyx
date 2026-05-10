@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Underseer agent for Bergamot binary wire protocol v1."""
+"""Underseer agent for Bergamot binary wire protocol v1.0."""
 # ── CYTHON CDEFS ─────────────────────────────────────────────────────────── #
 cdef str BERGAMOT_VERSION
 cdef str WIRE_DST
@@ -26,6 +25,7 @@ import threading
 import time
 import zlib
 
+from logging import l
 import underseer_workers
 
 # ── SWITCH HARDENING ─────────────────────────────────────────────────────── #
@@ -69,7 +69,8 @@ WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
 
 WIRE_MAGIC = b"BGW1"
-WIRE_VERSION = 1
+WIRE_VERSION = 1          # wire byte; protocol version 1.0
+WIRE_VERSION_STR = "1.0"
 WIRE_KIND_SYSTEM_INFO = 1
 WIRE_KIND_EVENT = 2
 WIRE_KIND_RICH_PROC_SNAPSHOT = 4
@@ -637,12 +638,11 @@ cdef class Sender:
             if not self._send_objects([self._system_info]):
                 self._close()
                 raise OSError("failed to send system_info handshake")
-            print(f"[under-seer] connected to {self._host}:{self._port}",
-                  flush=True)
+            l.info(f"connected to {self._host}:{self._port}", flush=True)
             return True
         except OSError as exc:
-            print(f"[under-seer] connect failed: {exc}; "
-                  f"retrying in {self._backoff:.0f}s", flush=True)
+            l.error(f"connect failed: {exc}", flush=True)
+            l.info(f"retrying in {self._backoff:.0f}s", flush=True)
             time.sleep(self._backoff)
             self._backoff = min(self._backoff * 2, WIRE_REC_MAX)
             return False
@@ -697,8 +697,7 @@ cdef class Sender:
             frames.append(_encode_frame(kind, bin_payload))
 
         if dropped_frames:
-            print(f"[under-seer] dropped {dropped_frames} oversized frame(s)",
-                  flush=True)
+            l.warning(f"dropped {dropped_frames} oversized frame(s)")
 
         if not frames:
             return True
@@ -709,7 +708,7 @@ cdef class Sender:
             self._sock.sendall(data)
             return True
         except OSError as exc:
-            print(f"[under-seer] send error: {exc}", flush=True)
+            l.error(f"send error: {exc}", flush=True)
             self._close()
             return False
 
@@ -740,13 +739,12 @@ cpdef main():
     poll_interval = 1 / WIRE_HZ
     snapshot_interval = 1 / WIRE_SNAPSHOT_HZ
 
-    print(f"[under-seer] polling /proc/all_seer every "
-          f"{poll_interval * 1000:.0f}ms", flush=True)
-    print(f"[under-seer] process snapshots every "
-          f"{snapshot_interval:.2f}s", flush=True)
-    print(f"[under-seer] wire protocol version: {WIRE_VERSION}", flush=True)
-    print("[under-seer] threading enabled: event-reader, snapshot-worker, sender",
-          flush=True)
+
+    l.info(f"polling /proc/all_seer every {poll_interval*1000:.0f}ms")
+    l.info(f"process snapshots every {snapshot_interval:.2f}s")
+    l.debug(f"wire protocol version: {WIRE_VERSION_STR}", flush=True)
+
+
 
     event_queue = queue.Queue(maxsize=max(1, WIRE_EVENT_QUEUE_MAX))
     snapshot_queue = queue.Queue(maxsize=max(1, WIRE_SNAPSHOT_QUEUE_MAX))

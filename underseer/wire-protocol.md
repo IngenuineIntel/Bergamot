@@ -2,13 +2,13 @@
 
 This document defines the active wire protocol between Underseer and Overseer.
 
-## Current Protocol (Version 1)
+## Current Protocol (Version 1.0)
 
 - Transport: TCP
 - Framing: binary, length-prefixed
 - Byte order: big-endian (network order)
 - Magic: `BGW1`
-- Version: `1`
+- Version: `1` (byte value; protocol version 1.0)
 - Header format: `!4sBBBBII`
 
 Header fields:
