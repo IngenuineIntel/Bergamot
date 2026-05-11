@@ -1,10 +1,10 @@
-# underseer_workers.pyx
+# workers.pyx
 # multithreadees
 import queue
 import sys
 import time
 
-from logging import l
+from interface import l
 
 def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
                      wire_batch_max, parse_line_cb, queue_put_cb):
@@ -69,7 +69,7 @@ def snapshot_worker_run(snapshot_queue, stop_event, snapshot_interval,
             stop_event.wait(sleep_for)
 
 
-def sender_run(sender, event_queue, snapshot_queue, stop_event):
+def sender_run(sender, event_queue, snapshot_queue, perf_queue, stop_event):
     while not stop_event.is_set():
         outbound = []
 
@@ -88,8 +88,18 @@ def sender_run(sender, event_queue, snapshot_queue, stop_event):
             except queue.Empty:
                 break
 
+        perf_data = []
+        while True:
+            try:
+                perf = perf_queue.get_nowait()
+                perf_data.append(perf)
+            except queue.Empty:
+                break
+
         if snapshots:
             outbound.extend(snapshots)
+        if perf_data:
+            outbound.extend(perf_data)
 
         if outbound:
             if not sender.send_batch(outbound):

@@ -73,7 +73,7 @@ settings. Currently, they are as follows:
  - `BERGAMOT_HTTP_PORT`: The port the Overseer hosts the webpage on, default is
  27960
  - `BERGAMOT_WIRE_HZ`: The frequency of the iterations the Underseer makes when
- reading/sending information, default is 0.25 (Hz)
+ reading/sending information, default is 0.25s (4Hz)
  - `BERGAMOT_BATCH_MAX`: The maximum amount of syscall entries that can be sent
  via the wire protocol at once
 

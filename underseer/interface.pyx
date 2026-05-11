@@ -59,6 +59,37 @@ cdef class Logger:
         ), file=self.stream, flush=flush)
 
 l = Logger()
+
+def args_from_argv(argv: list=sys.argv):
+    cdef int argc
+    cdef list ret
+    argc = len(argv)
+    ret = [""]
+    if "python" in argv[0]:
+        ret[0] = argv[0] + argv[1]
+    try:
+        for i in range(len(argv)):
+            if argv[i].startswith("-") and not argv[i+1].startwith("-"):
+                ret.append(argv[i] + " " + argv[i+1])
+                i += 1
+    except IndexError:
+        pass
+    return ret
+
+argv = args_from_argv(sys.argv)
+
+help_msg = """\
+USAGE: %s [FLAGS/VALS]
+
+Flags:
+    -h <VAL>       Host to connect to (default BERGAMOT_HOST or localhost)
+    -p <VAL>       Port to connect on (default BERGAMOT_WIRE_PORT or 12046)
+    -fe <VAL>      Frequency of event packets (default BERGAMOT_WIRE_HZ or 4hz)
+    -fs <VAL>      Frequency of process snapshot packets (default BERGAMOT_SNAPSHOT_HZ or 1)
+    -fp <VAL>      Frequency of performance snapshot packets (default BERGAMOT_PERF_HZ or 2)
+    -b <VAL>       Maximum events in single wire packet in MB (default BERGAMOT_BATCH_MAX or 1MB)
+""" % (argv[0])
+
 if __name__ == "__main__":
     l.critical("Sir...")
     l.error("Just import the code")

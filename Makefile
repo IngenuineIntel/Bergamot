@@ -42,7 +42,7 @@ underseer_prep_env:
 underseer_build: underseer_prep_env
 	cd $(UNDERSEER_DIR) && $(UNDERSEER_PYTHON) $(notdir $(UNDERSEER_SETUP)) build_ext --inplace
 
-underseer_run: underseer_build
+underseer_run:
 	sudo $(UNDERSEER_PYTHON) -c "import os, sys; sys.path.insert(0, os.path.abspath('$(UNDERSEER_DIR)')); import underseer; underseer.main()"
 
 underseer_clean:

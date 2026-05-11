@@ -6,9 +6,11 @@ cdef int WIRE_PORT
 cdef float WIRE_HZ
 cdef float WIRE_SNAPSHOT_HZ
 cdef int WIRE_BATCH_MAX
+cdef int WIRE_EVENT_QUEUE_MAX
+cdef int WIRE_SNAPSHOT_QUEUE_MAX
+cdef int WIRE_MAX_FRAME_MB
 cdef int WIRE_REC_MAX
 cdef int WIRE_TIMEOUT
-cdef int WIRE_SNAPSHOT_SORT
 cdef str PROC_PATH
 # ── END CYTHON CDEFS ─────────────────────────────────────────────────────── #
 
@@ -25,8 +27,8 @@ import threading
 import time
 import zlib
 
-from logging import l
-import underseer_workers
+from interface import l
+import workers
 
 # ── SWITCH HARDENING ─────────────────────────────────────────────────────── #
 """
@@ -52,18 +54,19 @@ WIRE_DST        The IP of the Overseer instance. Default is localhost.
 WIRE_PORT       The port of the Overseer instance, default is the port used for
                 texture downloads in Second Life 2.
 WIRE_HZ         The frequency the procfile is read and a network packet sent.
-WIRE_BATCH_MAX  The max amount of data to be read or sent ever iteration.
+WIRE_BATCH_MAX  Max batch size in megabytes before sending.
 WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
 """
 WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
 WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
 WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
 WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
-WIRE_BATCH_MAX = envvar_fetch("BERGAMOT_BATCH_MAX", int, 128)
-WIRE_EVENT_QUEUE_MAX = envvar_fetch("BERGAMOT_EVENT_QUEUE_MAX", int, 64)
-WIRE_SNAPSHOT_QUEUE_MAX = envvar_fetch("BERGAMOT_SNAPSHOT_QUEUE_MAX", int, 8)
-WIRE_MAX_FRAME_BYTES = envvar_fetch("BERGAMOT_WIRE_MAX_FRAME_BYTES", int,
-                                    1024 * 1024)
+# WIRE_BATCH_MAX_MB from env, converted to approximate item count (assume ~200 bytes/event)
+_batch_max_mb = envvar_fetch("BERGAMOT_BATCH_MAX", int, 1)
+WIRE_BATCH_MAX = max(1, (_batch_max_mb * 1024 * 1024) // 200)
+WIRE_EVENT_QUEUE_MAX = envvar_fetch("BERGAMOT_EVENT_QUEUE_MAX", int, 64) * (1024 * 1024)
+WIRE_SNAPSHOT_QUEUE_MAX = envvar_fetch("BERGAMOT_SNAPSHOT_QUEUE_MAX", int, 8) * (1024 * 1024)
+WIRE_MAX_FRAME_MB = envvar_fetch("BERGAMOT_WIRE_MAX_FRAME_MB", int, 1) * (1024 * 1024)
 WIRE_REC_MAX   = 30
 WIRE_TIMEOUT   = 5
 PROC_PATH      = "/proc/all_seer"
@@ -98,8 +101,8 @@ if WIRE_HZ <= 0:
     WIRE_HZ = 1
 if WIRE_SNAPSHOT_HZ <= 0:
     WIRE_SNAPSHOT_HZ = 1
-if WIRE_MAX_FRAME_BYTES < 256:
-    WIRE_MAX_FRAME_BYTES = 256
+if WIRE_MAX_FRAME_MB < 256:
+    WIRE_MAX_FRAME_MB = 256
 def _read_first_line(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -690,7 +693,7 @@ cdef class Sender:
                 kind = WIRE_KIND_EVENT
                 bin_payload = _encode_event_payload(obj)
 
-            if len(bin_payload) > WIRE_MAX_FRAME_BYTES:
+            if len(bin_payload) > WIRE_MAX_FRAME_MB:
                 dropped_frames += 1
                 continue
 
@@ -746,12 +749,16 @@ cpdef main():
 
 
 
-    event_queue = queue.Queue(maxsize=max(1, WIRE_EVENT_QUEUE_MAX))
-    snapshot_queue = queue.Queue(maxsize=max(1, WIRE_SNAPSHOT_QUEUE_MAX))
+    # Convert MB limits to reasonable item counts (assume ~50KB per item)
+    event_queue_size = max(1, min(1000, WIRE_EVENT_QUEUE_MAX // (50 * 1024)))
+    snapshot_queue_size = max(1, min(100, WIRE_SNAPSHOT_QUEUE_MAX // (50 * 1024)))
+
+    event_queue = queue.Queue(maxsize=event_queue_size)
+    snapshot_queue = queue.Queue(maxsize=snapshot_queue_size)
     stop_event = threading.Event()
 
     event_thread = threading.Thread(
-        target=underseer_workers.event_reader_run,
+        target=workers.event_reader_run,
         args=(
             event_queue,
             stop_event,
@@ -765,7 +772,7 @@ cpdef main():
         name="underseer-event-reader",
     )
     snapshot_thread = threading.Thread(
-        target=underseer_workers.snapshot_worker_run,
+        target=workers.snapshot_worker_run,
         args=(
             snapshot_queue,
             stop_event,
@@ -781,7 +788,7 @@ cpdef main():
     snapshot_thread.start()
 
     try:
-        underseer_workers.sender_run(sender, event_queue, snapshot_queue,
+        workers.sender_run(sender, event_queue, snapshot_queue,
                                      stop_event)
     finally:
         stop_event.set()
