@@ -310,7 +310,7 @@ def api_uptime():
     return jsonify({"uptime": store.get_conn_uptime()})
 
 # ── Entry point ──────────────────────────────────────────────────────────────
-def main()
+def main():
     def envvar_fetch(name: str, valtype: type, default):
         assert type(default) == valtype
         raw = os.environ.get(name)
