@@ -123,10 +123,10 @@ class EventStore:
             self._db_path = db_path
             conn = sqlite3.connect(db_path, timeout=5.0, check_same_thread=False)
 
-            newdb_path = os.path.join(sql_dir, "newdb.sql")
-            evententry_path = os.path.join(sql_dir, "evententry.sql")
-            procentry_path = os.path.join(sql_dir, "procentry.sql")
-            systemperfentry_path = os.path.join(sql_dir, "systemperfentry.sql")
+            newdb_path = os.path.join(sql_dir, "initdb.sql")
+            evententry_path = os.path.join(sql_dir, "entryevent.sql")
+            procentry_path = os.path.join(sql_dir, "entryproc.sql")
+            systemperfentry_path = os.path.join(sql_dir, "entryperf.sql")
 
             with open(newdb_path, "r", encoding="utf-8") as f:
                 newdb_sql = f.read()
