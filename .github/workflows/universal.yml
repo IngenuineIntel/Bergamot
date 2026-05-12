@@ -25,7 +25,7 @@ jobs:
       run: make overseer_prep_env
 
     - name: Start Overseer in the background
-      run: setsid make overseer_run
+      run: setsid make overseer_runl exit 0
 
     - name: Check for Overseer webpage
       run: make overseer_test_workflow
