@@ -1,337 +1,114 @@
-"""Underseer agent for Bergamot binary wire protocol v1.0."""
+"""The Bergamot Agent"""
 # ── CYTHON CDEFS ─────────────────────────────────────────────────────────── #
 cdef str BERGAMOT_VERSION
-cdef str WIRE_DST
-cdef int WIRE_PORT
-cdef float WIRE_HZ
-cdef float WIRE_SNAPSHOT_HZ
-cdef int WIRE_BATCH_MAX
-cdef int WIRE_EVENT_QUEUE_MAX
-cdef int WIRE_SNAPSHOT_QUEUE_MAX
-cdef int WIRE_MAX_FRAME_MB
-cdef int WIRE_REC_MAX
-cdef int WIRE_TIMEOUT
+cdef str TARGET_HOST
+cdef int TARGET_PORT
+cdef int EVENT_HZ
+cdef int PROC_HZ
+cdef int PERF_HZ
+cdef int BATCH_MAX_BYTES
+cdef int EVENT_QUEUE_MAX_BYTES
+cdef int PROC_QUEUE_MAX_BYTES
+cdef int PERF_QUEUE_MAX_BYTES
+cdef int MAX_FRAME_BYTES
+cdef int RECONNECT_MAX_SECONDS
+cdef int SOCKET_TIMEOUT_SECONDS
 cdef str PROC_PATH
 # ── END CYTHON CDEFS ─────────────────────────────────────────────────────── #
 
 BERGAMOT_VERSION = "1.0"
 
 import contextlib
+from dataclasses import dataclass
 import os
 import platform
 import queue
 import socket
-import struct
 import sys
 import threading
 import time
-import zlib
 
-from interface import l
+from interface import l, parse_interface_args
+from net import Sender
+from procurement import *
+import protocol
 import workers
 
-# ── SWITCH HARDENING ─────────────────────────────────────────────────────── #
-"""
-Inline code hardening would have been very superfluous and messy, ergo, a
-wrapper!
-"""
-def envvar_fetch(name: str, valtype: type, default):
-    try: default = valtype(default)
-    except TypeError: raise AssertionError(
-        f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
-    )
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return valtype(raw)
-    except Exception:
-        return default
-
 # ── SWITCHES ─────────────────────────────────────────────────────────────── #
-"""
-WIRE_DST        The IP of the Overseer instance. Default is localhost.
-WIRE_PORT       The port of the Overseer instance, default is the port used for
-                texture downloads in Second Life 2.
-WIRE_HZ         The frequency the procfile is read and a network packet sent.
-WIRE_BATCH_MAX  Max batch size in megabytes before sending.
-WIRE_REC_MAX    The seconds we'll wait to reestablish the wire protocol.
-"""
-WIRE_DST       = envvar_fetch("BERGAMOT_HOST", str, "127.0.0.1")
-WIRE_PORT      = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
-WIRE_HZ        = envvar_fetch("BERGAMOT_WIRE_HZ", float, 3)
-WIRE_SNAPSHOT_HZ = envvar_fetch("BERGAMOT_SNAPSHOT_HZ", float, 1)
-# WIRE_BATCH_MAX_MB from env, converted to approximate item count (assume ~200 bytes/event)
-_batch_max_mb = envvar_fetch("BERGAMOT_BATCH_MAX", int, 1)
-WIRE_BATCH_MAX = max(1, (_batch_max_mb * 1024 * 1024) // 200)
-WIRE_EVENT_QUEUE_MAX = envvar_fetch("BERGAMOT_EVENT_QUEUE_MAX", int, 64) * (1024 * 1024)
-WIRE_SNAPSHOT_QUEUE_MAX = envvar_fetch("BERGAMOT_SNAPSHOT_QUEUE_MAX", int, 8) * (1024 * 1024)
-WIRE_MAX_FRAME_MB = envvar_fetch("BERGAMOT_WIRE_MAX_FRAME_MB", int, 1) * (1024 * 1024)
-WIRE_REC_MAX   = 30
-WIRE_TIMEOUT   = 5
-PROC_PATH      = "/proc/all_seer"
+_cmdline = parse_interface_args()
+TARGET_HOST = _cmdline.host
+TARGET_PORT = _cmdline.port
+EVENT_HZ    = _cmdline.event_hz
+PROC_HZ     = _cmdline.proc_hz
+PERF_HZ     = _cmdline.perf_hz
 
-WIRE_MAGIC = b"BGW1"
-WIRE_VERSION = 1          # wire byte; protocol version 1.0
-WIRE_VERSION_STR = "1.0"
-WIRE_KIND_SYSTEM_INFO = 1
-WIRE_KIND_EVENT = 2
-WIRE_KIND_RICH_PROC_SNAPSHOT = 4
-WIRE_KIND_SYSTEM_PERF = 5
-WIRE_FLAG_CHECKSUM = 0x01
+BATCH_MAX_BYTES       = _cmdline.batch_max       * 1024 * 1024
+EVENT_QUEUE_MAX_BYTES = _cmdline.event_queue_max * 1024 * 1024
+PROC_QUEUE_MAX_BYTES  = _cmdline.proc_queue_max  * 1024 * 1024
+PERF_QUEUE_MAX_BYTES  = _cmdline.perf_queue_max  * 1024 * 1024
 
-WIRE_TYPE_MAP = {
-    "open": 1,
-    "fork": 2,
-    "connect": 3,
-    "execve": 4,
-    "accept": 5,
-    "unlink": 6,
-    "rename": 7,
-    "setuid": 8,
-    "setgid": 9,
-    "setreuid": 10,
-    "capset": 11,
-    "keyctl": 12,
-    "ptrace": 13,
-    "getid": 14,
-}
+MAX_FRAME_BYTES = 1024 * 1024
+RECONNECT_MAX_SECONDS = _cmdline.reconnect_timeout
+SOCKET_TIMEOUT_SECONDS = 5
 
-if WIRE_HZ <= 0:
-    WIRE_HZ = 1
-if WIRE_SNAPSHOT_HZ <= 0:
-    WIRE_SNAPSHOT_HZ = 1
-if WIRE_MAX_FRAME_MB < 256:
-    WIRE_MAX_FRAME_MB = 256
-def _read_first_line(path: str) -> str:
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            return fh.readline().strip()
-    except OSError:
-        return ""
+# ── GLOBALS ──────────────────────────────────────────────────────────────── #
 
+PROC_PATH = "/proc/all_seer"
 
-def _read_os_release() -> str:
-    pretty_name = ""
-    name = ""
-    version = ""
-
-    try:
-        with open("/etc/os-release", "r", encoding="utf-8", errors="replace") as fh:
-            for raw_line in fh:
-                line = raw_line.strip()
-                if not line or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                value = value.strip().strip('"')
-                if key == "PRETTY_NAME":
-                    pretty_name = value
-                elif key == "NAME":
-                    name = value
-                elif key == "VERSION":
-                    version = value
-    except OSError:
-        return ""
-
-    if pretty_name:
-        return pretty_name
-    return " ".join(part for part in (name, version) if part).strip()
-
-
-def _get_primary_ipv4() -> str:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("8.8.8.8", 80))
-            return str(sock.getsockname()[0] or "")
-    except OSError:
-        return ""
-
-
-def _get_primary_interface() -> str:
-    try:
-        with open("/proc/net/route", "r", encoding="utf-8", errors="replace") as fh:
-            next(fh, None)
-            for line in fh:
-                cols = line.split()
-                if len(cols) >= 2 and cols[1] == "00000000":
-                    return cols[0]
-    except OSError:
-        pass
-    return ""
-
-
-def _get_mac_address(iface: str) -> str:
-    if not iface:
-        return ""
-    return _read_first_line(f"/sys/class/net/{iface}/address")
-
-
-def _read_cpu_info() -> tuple[str, str]:
-    model = ""
-    vendor = ""
-    try:
-        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
-            for raw_line in fh:
-                line = raw_line.strip()
-                if not line or ":" not in line:
-                    continue
-                key, value = [part.strip() for part in line.split(":", 1)]
-                if key == "model name" and not model:
-                    model = value
-                elif key == "vendor_id" and not vendor:
-                    vendor = value
-                if model and vendor:
-                    break
-    except OSError:
-        return "", ""
-    return model, vendor
-
-
-def _read_ram_gbs() -> int:
-    try:
-        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:
-            for raw_line in fh:
-                if not raw_line.startswith("MemTotal:"):
-                    continue
-                parts = raw_line.split()
-                if len(parts) < 2:
-                    return 0
-                kib = int(parts[1])
-                return max(1, round(kib / (1024 * 1024)))
-    except (OSError, ValueError):
-        return 0
-    return 0
-
+# minimum values to prevent breakage
+if EVENT_HZ <= 0:
+    EVENT_HZ = 1
+if PROC_HZ <= 0:
+    PROC_HZ = 1
+if PERF_HZ <= 0:
+    PERF_HZ = 1
+if MAX_FRAME_BYTES < 256:
+    MAX_FRAME_BYTES = 256
 
 def collect_system_info() -> dict:
     uname = platform.uname()
-    primary_iface = _get_primary_interface()
-    processor, processor_vend = _read_cpu_info()
+    primary_iface = get_primary_interface()
+    processor, processor_vend = read_cpu_info()
     return {
         "kind": "system_info",
         "hostname": socket.gethostname(),
         "kernelver": " ".join(part for part in (uname.release, uname.machine) if part).strip(),
-        "distro": _read_os_release(),
-        "ipaddr": _get_primary_ipv4(),
-        "macaddr": _get_mac_address(primary_iface),
+        "distro": read_os_release(),
+        "ipaddr": get_primary_ipv4(),
+        "macaddr": get_mac_address(primary_iface),
         "processor": processor,
         "processor_vend": processor_vend,
-        "ram_gbs": _read_ram_gbs(),
+        "ram_gbs": read_ram_gbs(),
     }
 
 
-def _pack_str(val: object) -> bytes:
-    data = str(val or "").encode("utf-8", errors="replace")
-    if len(data) > 65535:
-        data = data[:65535]
-    return struct.pack("!H", len(data)) + data
+@dataclass
+class _QueueBytesState:
+    max_bytes: int
+    used_bytes: int = 0
+    dropped_items: int = 0
+    lock: object = None
 
 
-def _encode_system_info_payload(obj: dict) -> bytes:
-    return b"".join([
-        _pack_str(obj.get("hostname", "")),
-        _pack_str(obj.get("kernelver", "")),
-        _pack_str(obj.get("distro", "")),
-        _pack_str(obj.get("ipaddr", "")),
-        _pack_str(obj.get("macaddr", "")),
-        _pack_str(obj.get("processor", "")),
-        _pack_str(obj.get("processor_vend", "")),
-        struct.pack("!i", int(obj.get("ram_gbs", 0) or 0)),
-    ])
+def _queue_put_drop_oldest(q: object, state: _QueueBytesState, item: object, item_bytes: int):
+    if item_bytes <= 0:
+        return
 
+    if item_bytes > state.max_bytes:
+        l.warning(f"dropping item larger than queue byte limit ({item_bytes} > {state.max_bytes})", flush=True)
+        return
 
-def _encode_event_payload(obj: dict) -> bytes:
-    ev_type = str(obj.get("type", "") or "")
-    type_id = int(WIRE_TYPE_MAP.get(ev_type, 0))
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    pid = int(obj.get("pid", 0) or 0)
-    ppid = int(obj.get("ppid", 0) or 0)
-    uid = int(obj.get("uid", 0) or 0)
+    with state.lock:
+        while state.used_bytes + item_bytes > state.max_bytes:
+            try:
+                dropped_item, dropped_bytes = q.get_nowait()
+                state.used_bytes = max(0, state.used_bytes - int(dropped_bytes))
+                state.dropped_items += 1
+            except queue.Empty:
+                break
 
-    return b"".join([
-        struct.pack("!qHiiiB", ts_s, ts_ms, pid, ppid, uid, type_id),
-        _pack_str(obj.get("subtype", "")),
-        _pack_str(obj.get("comm", "")),
-        _pack_str(obj.get("arg1", obj.get("arg", ""))),
-        _pack_str(obj.get("arg2", "")),
-    ])
-
-
-def _encode_rich_snapshot_payload(obj: dict) -> bytes:
-    """Encode kind=4 rich_proc_snapshot: adds cpu_ticks (uint64) and vm_rss_kb (uint32) per row."""
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    rows = obj.get("processes", [])
-    if not isinstance(rows, list):
-        rows = []
-    if len(rows) > 65535:
-        rows = rows[:65535]
-
-    chunks = [struct.pack("!qHH", ts_s, ts_ms, len(rows))]
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        chunks.append(struct.pack(
-            "!iiiHQI",
-            int(row.get("pid", 0) or 0),
-            int(row.get("ppid", 0) or 0),
-            int(row.get("uid", 0) or 0),
-            int(row.get("threads", 0) or 0),
-            int(row.get("cpu_ticks", 0) or 0),
-            int(row.get("vm_rss_kb", 0) or 0),
-        ))
-        chunks.append(_pack_str(row.get("comm", "")))
-
-    return b"".join(chunks)
-
-
-def _encode_system_perf_payload(obj: dict) -> bytes:
-    """Encode kind=5 system_perf: per-core CPU ticks, RAM 4-tuple, load avg 3-tuple."""
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    cores = obj.get("cores", [])
-    if not isinstance(cores, list):
-        cores = []
-    num_cores = min(len(cores), 255)
-
-    mem = obj.get("mem", [0, 0, 0, 0])
-    load = obj.get("load", [0.0, 0.0, 0.0])
-
-    chunks = [struct.pack("!qHBx", ts_s, ts_ms, num_cores)]
-    for core in cores[:num_cores]:
-        if not isinstance(core, list) or len(core) < 7:
-            core = [0] * 7
-        chunks.append(struct.pack("!7Q", *[int(v) for v in core[:7]]))
-
-    chunks.append(struct.pack("!4Q",
-        int(mem[0]) if len(mem) > 0 else 0,
-        int(mem[1]) if len(mem) > 1 else 0,
-        int(mem[2]) if len(mem) > 2 else 0,
-        int(mem[3]) if len(mem) > 3 else 0,
-    ))
-    # load avg stored as fixed-point x100, clamped to uint16 max (655.35)
-    chunks.append(struct.pack("!3H",
-        min(int(float(load[0] if len(load) > 0 else 0) * 100), 65535),
-        min(int(float(load[1] if len(load) > 1 else 0) * 100), 65535),
-        min(int(float(load[2] if len(load) > 2 else 0) * 100), 65535),
-    ))
-
-    return b"".join(chunks)
-
-
-def _encode_frame(kind: int, payload: bytes) -> bytes:
-    csum = zlib.crc32(payload) & 0xFFFFFFFF
-    return struct.pack(
-        "!4sBBBBII",
-        WIRE_MAGIC,
-        WIRE_VERSION,
-        kind,
-        WIRE_FLAG_CHECKSUM,
-        0,
-        len(payload),
-        csum,
-    ) + payload
+        q.put_nowait((item, item_bytes))
+        state.used_bytes += item_bytes
 
 cdef object parse_line(str line):
     """
@@ -598,135 +375,9 @@ def collect_all_snapshots() -> list:
     """Return both rich_proc_snapshot and system_perf as a list for the snapshot worker."""
     return [collect_process_snapshot(), collect_system_perf()]
 
-
-def _queue_put_drop_oldest(q: object, item: object):
-    try:
-        q.put_nowait(item)
-    except queue.Full:
-        try:
-            q.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            q.put_nowait(item)
-        except queue.Full:
-            pass
-
-
-# ── TCP sender with reconnect back-off ───────────────────────────────────── #
-
-cdef class Sender:
-    cdef str _host
-    cdef int _port
-    cdef object _sock
-    cdef double _backoff
-    cdef dict _system_info
-
-    def __init__(self, str host, int port):
-        self._host = host
-        self._port = port
-        self._sock = None
-        self._backoff = 1.0
-        self._system_info = collect_system_info()
-
-    cdef bint _connect(self):
-        cdef object s
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(WIRE_TIMEOUT)
-            s.connect((self._host, self._port))
-            s.settimeout(None)
-            self._sock = s
-            self._backoff = 1.0
-            if not self._send_objects([self._system_info]):
-                self._close()
-                raise OSError("failed to send system_info handshake")
-            l.info(f"connected to {self._host}:{self._port}", flush=True)
-            return True
-        except OSError as exc:
-            l.error(f"connect failed: {exc}", flush=True)
-            l.info(f"retrying in {self._backoff:.0f}s", flush=True)
-            time.sleep(self._backoff)
-            self._backoff = min(self._backoff * 2, WIRE_REC_MAX)
-            return False
-
-    cpdef void connect(self):
-        while not self._connect():
-            pass
-
-    cpdef bint send_batch(self, list events):
-        """
-        Encode and send a batch of events.  Returns False if the connection
-        was lost; caller should reconnect and retry.
-        """
-        if not events:
-            return True
-
-        return self._send_objects(events)
-
-    cdef bint _send_objects(self, list payloads):
-        cdef str payload
-        cdef bytes data
-        cdef object obj
-        cdef bytes bin_payload
-        cdef int kind
-        cdef list frames
-        cdef int dropped_frames = 0
-        if self._sock is None:
-            return False
-
-        frames = []
-        for obj in payloads:
-            if not isinstance(obj, dict):
-                continue
-
-            if obj.get("kind") == "system_info":
-                kind = WIRE_KIND_SYSTEM_INFO
-                bin_payload = _encode_system_info_payload(obj)
-            elif obj.get("kind") == "rich_proc_snapshot":
-                kind = WIRE_KIND_RICH_PROC_SNAPSHOT
-                bin_payload = _encode_rich_snapshot_payload(obj)
-            elif obj.get("kind") == "system_perf":
-                kind = WIRE_KIND_SYSTEM_PERF
-                bin_payload = _encode_system_perf_payload(obj)
-            else:
-                kind = WIRE_KIND_EVENT
-                bin_payload = _encode_event_payload(obj)
-
-            if len(bin_payload) > WIRE_MAX_FRAME_MB:
-                dropped_frames += 1
-                continue
-
-            frames.append(_encode_frame(kind, bin_payload))
-
-        if dropped_frames:
-            l.warning(f"dropped {dropped_frames} oversized frame(s)")
-
-        if not frames:
-            return True
-
-        data = b"".join(frames)
-
-        try:
-            self._sock.sendall(data)
-            return True
-        except OSError as exc:
-            l.error(f"send error: {exc}", flush=True)
-            self._close()
-            return False
-
-    cdef void _close(self):
-        if self._sock:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-            self._sock = None
-
-
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
-cpdef main():
+def main():
     cdef Sender sender
     cdef double poll_interval
     cdef double snapshot_interval
@@ -736,63 +387,79 @@ cpdef main():
     cdef object event_thread
     cdef object snapshot_thread
 
-    sender = Sender(WIRE_DST, WIRE_PORT)
-    sender.connect()
-
-    poll_interval = 1 / WIRE_HZ
-    snapshot_interval = 1 / WIRE_SNAPSHOT_HZ
-
-
-    l.info(f"polling /proc/all_seer every {poll_interval*1000:.0f}ms")
-    l.info(f"process snapshots every {snapshot_interval:.2f}s")
-    l.debug(f"wire protocol version: {WIRE_VERSION_STR}", flush=True)
-
-
-
-    # Convert MB limits to reasonable item counts (assume ~50KB per item)
-    event_queue_size = max(1, min(1000, WIRE_EVENT_QUEUE_MAX // (50 * 1024)))
-    snapshot_queue_size = max(1, min(100, WIRE_SNAPSHOT_QUEUE_MAX // (50 * 1024)))
-
-    event_queue = queue.Queue(maxsize=event_queue_size)
-    snapshot_queue = queue.Queue(maxsize=snapshot_queue_size)
-    stop_event = threading.Event()
-
-    event_thread = threading.Thread(
-        target=workers.event_reader_run,
-        args=(
-            event_queue,
-            stop_event,
-            poll_interval,
-            PROC_PATH,
-            WIRE_BATCH_MAX,
-            parse_line,
-            _queue_put_drop_oldest,
-        ),
-        daemon=True,
-        name="underseer-event-reader",
-    )
-    snapshot_thread = threading.Thread(
-        target=workers.snapshot_worker_run,
-        args=(
-            snapshot_queue,
-            stop_event,
-            snapshot_interval,
-            collect_all_snapshots,
-            _queue_put_drop_oldest,
-        ),
-        daemon=True,
-        name="underseer-snapshot-worker",
-    )
-
-    event_thread.start()
-    snapshot_thread.start()
-
     try:
-        workers.sender_run(sender, event_queue, snapshot_queue,
-                                     stop_event)
-    finally:
-        stop_event.set()
+        sender = Sender(TARGET_HOST, TARGET_PORT)
+        sender.connect()
 
+        poll_interval = 1 / EVENT_HZ
+        snapshot_interval = 1 / PROC_HZ
+
+
+        l.info(f"polling the Engine feed at /proc/all_seer @ {EVENT_HZ}hz")
+        l.info(f"process snapshots @ {PROC_HZ:.2f}hz")
+        l.info(f"perf snapshots @ {PERF_HZ:.2f}Hz (emitted alongside proc snapshots)")
+        l.debug(f"wire protocol version: {protocol.WIRE_VERSION_STR}", flush=True)
+
+
+
+        event_queue = queue.Queue()
+        snapshot_queue = queue.Queue()
+        event_queue_state = _QueueBytesState(
+            max_bytes=EVENT_QUEUE_MAX_BYTES,
+            lock=threading.Lock(),
+        )
+        snapshot_queue_state = _QueueBytesState(
+            max_bytes=max(PROC_QUEUE_MAX_BYTES, PERF_QUEUE_MAX_BYTES),
+            lock=threading.Lock(),
+        )
+        stop_event = threading.Event()
+
+        def _event_queue_put_cb(q_obj, item_obj, item_bytes):
+            _queue_put_drop_oldest(q_obj, event_queue_state, item_obj, item_bytes)
+
+        def _snapshot_queue_put_cb(q_obj, item_obj, item_bytes):
+            _queue_put_drop_oldest(q_obj, snapshot_queue_state, item_obj, item_bytes)
+
+        event_thread = threading.Thread(
+            target=workers.event_reader_run,
+            args=(
+                event_queue,
+                stop_event,
+                poll_interval,
+                PROC_PATH,
+                BATCH_MAX_BYTES,
+                protocol.event_frame_size_bytes,
+                parse_line,
+                _event_queue_put_cb,
+            ),
+            daemon=True,
+            name="bergamot-agent-event-reader",
+        )
+        snapshot_thread = threading.Thread(
+           target=workers.snapshot_worker_run,
+            args=(
+               snapshot_queue,
+                stop_event,
+                snapshot_interval,
+                collect_all_snapshots,
+                protocol.object_frame_size_bytes,
+               _snapshot_queue_put_cb,
+            ),
+            daemon=True,
+            name="bergamot-agent-snapshot-worker",
+        )
+
+        event_thread.start()
+        snapshot_thread.start()
+
+        try:
+            workers.sender_run(sender, event_queue, snapshot_queue,
+                                         stop_event)
+        finally:
+            stop_event.set()
+    except KeyboardInterrupt:
+        l.critical("CTRL-C")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
