@@ -105,7 +105,6 @@ lower_start: allseer_build allseer_load
 
 lower_stop:
 	-@sudo bash -c "for pid in \`ps -ef | grep -E 'underseer|bergamot-agent' | grep -v 'lower_stop' | awk '{print \$$2}'\`; do kill \$$pid; done"
-	@$(MAKE) underseer_clean
 	@$(MAKE) allseer_unload
 
 web_start:

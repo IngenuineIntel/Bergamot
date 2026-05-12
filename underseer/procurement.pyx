@@ -1,8 +1,10 @@
 # procurement.pyx
 
-# ── System Over acquisition ──────────────────────────────────────────────── #
+# ── System Oveview acquisition ───────────────────────────────────────────── #
+import platform
+import socket
 
-def _read_os_release() -> str:
+def read_os_release() -> str:
     pretty_name = ""
     name = ""
     version = ""
@@ -97,3 +99,20 @@ def read_ram_gbs() -> int:
     except (OSError, ValueError):
         return 0
     return 0
+
+def collect_system_info() -> dict:
+    uname = platform.uname()
+    primary_iface = get_primary_interface()
+    processor, processor_vend = read_cpu_info()
+    return {
+        "kind": "system_info",
+        "hostname": socket.gethostname(),
+        "kernelver": " ".join(part for part in (uname.release, uname.machine) if part).strip(),
+        "distro": read_os_release(),
+        "ipaddr": get_primary_ipv4(),
+        "macaddr": get_mac_address(primary_iface),
+        "processor": processor,
+        "processor_vend": processor_vend,
+        "ram_gbs": read_ram_gbs(),
+    }
+

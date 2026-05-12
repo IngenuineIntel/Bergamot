@@ -21,9 +21,7 @@ BERGAMOT_VERSION = "1.0"
 import contextlib
 from dataclasses import dataclass
 import os
-import platform
 import queue
-import socket
 import sys
 import threading
 import time
@@ -64,22 +62,6 @@ if PERF_HZ <= 0:
     PERF_HZ = 1
 if MAX_FRAME_BYTES < 256:
     MAX_FRAME_BYTES = 256
-
-def collect_system_info() -> dict:
-    uname = platform.uname()
-    primary_iface = get_primary_interface()
-    processor, processor_vend = read_cpu_info()
-    return {
-        "kind": "system_info",
-        "hostname": socket.gethostname(),
-        "kernelver": " ".join(part for part in (uname.release, uname.machine) if part).strip(),
-        "distro": read_os_release(),
-        "ipaddr": get_primary_ipv4(),
-        "macaddr": get_mac_address(primary_iface),
-        "processor": processor,
-        "processor_vend": processor_vend,
-        "ram_gbs": read_ram_gbs(),
-    }
 
 
 @dataclass
@@ -378,7 +360,7 @@ def collect_all_snapshots() -> list:
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def main():
-    cdef Sender sender
+    cdef object sender
     cdef double poll_interval
     cdef double snapshot_interval
     cdef object event_queue
@@ -388,7 +370,10 @@ def main():
     cdef object snapshot_thread
 
     try:
-        sender = Sender(TARGET_HOST, TARGET_PORT)
+        sender = Sender(
+            TARGET_HOST, TARGET_PORT, RECONNECT_MAX_SECONDS, MAX_FRAME_BYTES,
+            SOCKET_TIMEOUT_SECONDS
+        )
         sender.connect()
 
         poll_interval = 1 / EVENT_HZ

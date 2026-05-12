@@ -7,7 +7,7 @@ setup(
         "procurement.pyx",
         "protocol.pyx",
         "net.pyx",
-        "underseer.pyx"
         "workers.pyx",
+        "underseer.pyx",
     ])
 )

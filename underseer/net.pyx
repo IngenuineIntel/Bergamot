@@ -1,7 +1,10 @@
 # net.pyx
 
 from interface import l
+from procurement import collect_system_info
 import protocol
+import socket
+import time
 
 # ── TCP sender with reconnect back-off ───────────────────────────────────── #
 
@@ -11,10 +14,17 @@ cdef class Sender:
     cdef object _sock
     cdef double _backoff
     cdef dict _system_info
+    cdef int reconnect_max_seconds
+    cdef int max_frame_bytes
+    cdef int sock_timeout_secs
 
-    def __init__(self, str host, int port):
+    def __init__(self, str host, int port, int reconnect_max_seconds=30,
+                 int max_frame_bytes=1_048_000, int sock_timeout_secs=5):
         self._host = host
         self._port = port
+        self.reconnect_max_seconds = reconnect_max_seconds
+        self.max_frame_bytes = max_frame_bytes
+        self.sock_timeout_secs = max(1, sock_timeout_secs)
         self._sock = None
         self._backoff = 1.0
         self._system_info = collect_system_info()
@@ -23,7 +33,7 @@ cdef class Sender:
         cdef object s
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(SOCKET_TIMEOUT_SECONDS)
+            s.settimeout(self.sock_timeout_secs)
             s.connect((self._host, self._port))
             s.settimeout(None)
             self._sock = s
@@ -33,7 +43,7 @@ cdef class Sender:
                 l.critical("failed to send system_info handshake", flush=True)
                 l.info(f"retrying in {self._backoff:.0f}s", flush=True)
                 time.sleep(self._backoff)
-                self._backoff = min(self._backoff * 2, RECONNECT_MAX_SECONDS)
+                self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
                 return False
             l.info(f"connected to {self._host}:{self._port}", flush=True)
             return True
@@ -41,7 +51,7 @@ cdef class Sender:
             l.error(f"connect failed: {exc}", flush=True)
             l.info(f"retrying in {self._backoff:.0f}s", flush=True)
             time.sleep(self._backoff)
-            self._backoff = min(self._backoff * 2, RECONNECT_MAX_SECONDS)
+            self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
             return False
 
     cpdef void connect(self):
@@ -76,7 +86,7 @@ cdef class Sender:
 
             kind, bin_payload = protocol.encode_wire_payload(obj)
 
-            if len(bin_payload) > MAX_FRAME_BYTES:
+            if len(bin_payload) > self.max_frame_bytes:
                 dropped_frames += 1
                 continue
 
