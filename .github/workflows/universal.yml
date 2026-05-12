@@ -12,14 +12,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build Allseer
-      run: make allseer_build
+    - name: Build The Bergamot Engine
+      run: make engine_build
 
-    - name: Load/Test Allseer
-      run: make allseer_test_workflow
+    - name: Load/Test The Bergamot Engine
+      run: make engine_test_workflow
 
-    - name: Setup Underseer Venv
-      run: make underseer_prep_env
+    - name: Setup The Bergamot Agent Venv
+      run: make agent_prep_env
 
     - name: Setup Overseer Venv
       run: make overseer_prep_env
@@ -27,8 +27,8 @@ jobs:
     - name: Run Everything Simultaneously & Check for Webpage
       run:
         -|
-         make allseer_load
-         make underseer_run &
+         make engine_load
+         make agent_run &
          make overseer_run &
          make overseer_test_workflow
 

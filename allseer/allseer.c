@@ -698,7 +698,7 @@ static int __init allseer_init(void) {
   // registering /proc/all_seer
   as_all_seer_entry = proc_create("all_seer", 0400, NULL, &as_all_seer_ops);
   if (!as_all_seer_entry) {
-    pr_err("all_seer: failed to create /proc/all_seer\n");
+    pr_err("engine: failed to create /proc/all_seer\n");
     proc_remove(as_all_seer_entry);
 
     return -ENOMEM;
@@ -708,7 +708,7 @@ static int __init allseer_init(void) {
   for (i = 0; i < as_num_probes; i++) {
     ret = register_kprobe(&as_kprobes[i]);
     if (ret < 0) {
-      pr_err("all_seer: register_kprobe failed for %s (%d)\n",
+      pr_err("engine: register_kprobe failed for %s (%d)\n",
              as_kprobes[i].symbol_name, ret);
 
       /* Unwind already-registered probes */
@@ -751,9 +751,9 @@ static int __init allseer_init(void) {
     }
 
     if (as_execve_probe_registered)
-      pr_info("all_seer: execve hook registered on %s\n", as_execve_probe_symbol);
+      pr_info("engine: execve hook registered on %s\n", as_execve_probe_symbol);
     else
-      pr_warn("all_seer: execve hook unavailable; continuing without execve capture\n");
+      pr_warn("engine: execve hook unavailable; continuing without execve capture\n");
   }
 #endif
 
@@ -762,7 +762,7 @@ static int __init allseer_init(void) {
 
   atomic_set(&as_ready, 1);
 
-    pr_info("all_seer: loaded (%d hook(s) active)\n",
+    pr_info("engine: loaded (%d hook(s) active)\n",
       as_num_probes + (as_execve_probe_registered ? 1 : 0));
 
   return 0;
@@ -789,7 +789,7 @@ static void __exit allseer_exit(void) {
   // unregistering procfs entries
   proc_remove(as_all_seer_entry);
 
-  pr_info("all_seer: unloaded\n");
+  pr_info("engine: unloaded\n");
 }
 
 module_init(allseer_init);

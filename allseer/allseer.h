@@ -4,9 +4,9 @@
 /*
  * Interface contract across components:
  *   hooks.c produces struct as_event via as_emit_event().
- *   allseer.c drains struct as_event to procfs line format:
+ *   engine (allseer.c) drains struct as_event to procfs line format:
  *     <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
- *   underseer.py parses that line into JSON keys:
+ *   agent (underseer.py) parses that line into JSON keys:
  *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
  *
  * Field mapping:
@@ -14,7 +14,7 @@
  *   pid          -> pid
  *   ppid         -> ppid
  *   uid          -> uid
- *   type         -> type (stringified in allseer.c)
+ *   type         -> type (stringified by engine in allseer.c)
  *   subtype      -> subtype (future syscall minutia)
  *   comm         -> comm
  *   arg          -> arg / arg1

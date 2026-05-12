@@ -7,17 +7,17 @@
  *   1) Kernel syscall path triggers a kprobe handler in this file.
  *   2) Handler checks shared guards (as_ready, as_collecting).
  *   3) Handler calls as_emit_event(type, subtype, arg).
- *   4) allseer.c pushes event to kfifo.
- *   5) Under-Seer drains kfifo entries by reading /proc/all_seer.
+ *   4) engine (allseer.c) pushes event to kfifo.
+ *   5) agent drains kfifo entries by reading /proc/all_seer.
  *
  * This file owns syscall-argument extraction only.
  * Buffering, ownership checks, procfs formatting, and control commands
- * live in allseer.c.
+ * live in the engine implementation (allseer.c).
  *
  * Adding a new hook:
  *   1. Write a new as_probe_<name>() pre-handler here.
  *   2. Add a matching #define AS_HOOK_<NAME> flag in hooks_config.h.
- *   3. Add a kprobe entry in the allseer.c kprobes[] array, guarded by
+ *   3. Add a kprobe entry in the engine kprobes[] array (allseer.c), guarded by
  *      #if AS_HOOK_<NAME>.
  *
  * Guards at the top of each section mirror the flags in hooks_config.h
@@ -43,7 +43,7 @@
 #include "switches.h"
 
 /*
- * Guards declared in allseer.c.  Each handler checks them before doing
+ * Guards declared in allseer.c. Each engine handler checks them before doing
  * any work so that probe firings during module init/exit are no-ops.
  */
 extern atomic_t as_ready;
