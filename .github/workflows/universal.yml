@@ -12,25 +12,29 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build The Bergamot Engine
+    - name: Build the Engine
       run: make engine_build
 
-    - name: Load/Test The Bergamot Engine
+    - name: Load/Test the Engine
       run: make engine_test_workflow
 
-    - name: Setup The Bergamot Agent Venv
-      run: make agent_prep_env
+    - name: Setup Underseer VEnv
+      run: make underseer_prep_env
 
-    - name: Setup Overseer Venv
+    - name: Setup Overseer VENV
       run: make overseer_prep_env
 
-    - name: Run Everything Simultaneously & Check for Webpage
-      run:
-        -|
-         make engine_load
-         make agent_run &
-         make overseer_run &
-         make overseer_test_workflow
+    - name: Start Overseer in the background
+      run: setsid make overseer_start
+
+    - name: Check for Overseer webpage
+      run: make overseer_test_workflow
+
+    - name: Build Underseer
+      run: make underseer_build
+
+    - name: Run Underseer
+      run: make underseer_run &
 
     - name: Stop Everything
       continue-on-error: true
