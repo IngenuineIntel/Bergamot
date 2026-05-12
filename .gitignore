@@ -5,6 +5,7 @@ underseer/env
 # Kmod build artifacts.
 allseer/build
 allseer/.module-common.o
+bergamot_engine.ko
 
 # __pycache__'s
 **/__pycache__/
@@ -16,9 +17,9 @@ underseer/build
 
 # Agent build artifacts
 underseer/*.egg-info
-bergamot-agent
 pyinstaller_hooks
 bergamot-agent-dist
+bergamot-agent
 
 # SQLite databases
-/overseer/db/*
+/overseer/db

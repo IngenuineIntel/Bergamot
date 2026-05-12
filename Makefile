@@ -143,5 +143,12 @@ agent_freeze:
 engine-freeze:
 	@mkdir -p $(MODULE_DIR)/build
 	$(MAKE) -C /lib/modules/$$(uname -r)/build M=$$(pwd)/allseer MO=$$(pwd)/allseer/build modules
-	-rm -f ./bergamot-engine
-	cp $(MODULE_DIR)/build/allseer_kmod.ko ./bergamot-engine
+	-rm -f ./bergamot_engine.ko
+	cp $(MODULE_DIR)/build/allseer_kmod.ko ./bergamot_engine.ko
+
+engine_install: engine-freeze
+	@mkdir -p $(MODULE_DIR)/build
+	$(MAKE) -C /lib/modules/$$(uname -r)/build M=$$(pwd)/allseer MO=$$(pwd)/allseer/build modules
+	sudo install -D -m 0644 $(MODULE_KO) /lib/modules/$$(uname -r)/extra/bergamot_engine.ko
+	sudo depmod -a
+	# --> sudo modprobe allseer_kmod <--
