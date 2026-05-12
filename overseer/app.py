@@ -310,14 +310,9 @@ def api_uptime():
     return jsonify({"uptime": store.get_conn_uptime()})
 
 # ── Entry point ──────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+def main()
     def envvar_fetch(name: str, valtype: type, default):
-        try:
-            default = valtype(default)
-        except TypeError:
-            raise AssertionError(
-            f"'default' {default} isn't of type {valtype} supplied as 'valtype'."
-        )
+        assert type(default) == valtype
         raw = os.environ.get(name)
         if raw is None:
             return default
@@ -355,4 +350,6 @@ if __name__ == "__main__":
 
     start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)
-else: raise ImportError("Don't import me!!!")
+
+if __name__ == "__main__":
+    main()

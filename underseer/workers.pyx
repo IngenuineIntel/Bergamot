@@ -10,6 +10,7 @@ def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
                      wire_batch_max_bytes, size_bytes_cb, parse_line_cb, queue_put_cb):
     lease_announced = False
     next_poll_at = time.monotonic()
+    error_backoff_seconds = 0.2
 
     while not stop_event.is_set():
         batch = []
@@ -39,14 +40,22 @@ def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
                         batch.append(ev)
                         batch_bytes += ev_size
         except PermissionError:
-            continue
+            l.critical(
+                f"permission denied reading {proc_path}; process must be run with sudo",
+                flush=True,
+                exitcode=1,
+            )
         except FileNotFoundError:
             l.critical(f"{proc_path} unavalible")
             l.debug("either another process has already claimed it, or the module's not loaded", flush=True)
             time.sleep(5)
             continue
         except OSError as exc:
-            l.error(f"read failed: {exc}", flush=True)
+            l.warning(
+                f"read failed ({exc}); backing off for {error_backoff_seconds:.1f}s",
+                flush=True,
+            )
+            stop_event.wait(error_backoff_seconds)
             continue
 
         if batch:
@@ -119,5 +128,6 @@ def sender_run(sender, event_queue, snapshot_queue, stop_event):
 
         if outbound:
             if not sender.send_batch(outbound):
-                sender.connect()
+                if not sender.connect(stop_event):
+                    continue
                 sender.send_batch(outbound)

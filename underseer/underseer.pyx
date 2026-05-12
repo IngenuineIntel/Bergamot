@@ -22,6 +22,7 @@ import contextlib
 from dataclasses import dataclass
 import os
 import queue
+import signal
 import sys
 import threading
 import time
@@ -368,19 +369,46 @@ def main():
     cdef object stop_event
     cdef object event_thread
     cdef object snapshot_thread
+    cdef object prev_sigint
+    cdef object prev_sigterm
+
+    # Check for sudo/root privileges
+    if os.geteuid() != 0:
+        l.critical("try it with sudo", flush=True, exitcode=1)
+
+    stop_event = threading.Event()
+    sender = None
+    event_thread = None
+    snapshot_thread = None
+    prev_sigint = None
+    prev_sigterm = None
+
+    def _request_stop(signum, _frame):
+        stop_event.set()
+        if sender is not None:
+            with contextlib.suppress(Exception):
+                sender.close()
+        l.critical("CTRL-C", flush=True)
+        sys.exit(2)
 
     try:
+        prev_sigint = signal.getsignal(signal.SIGINT)
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, _request_stop)
+        signal.signal(signal.SIGTERM, _request_stop)
+
         sender = Sender(
             TARGET_HOST, TARGET_PORT, RECONNECT_MAX_SECONDS, MAX_FRAME_BYTES,
             SOCKET_TIMEOUT_SECONDS
         )
-        sender.connect()
+        if not sender.connect(stop_event):
+            return
 
         poll_interval = 1 / EVENT_HZ
         snapshot_interval = 1 / PROC_HZ
 
 
-        l.info(f"polling the Engine feed at /proc/all_seer @ {EVENT_HZ}hz")
+        l.info(f"polling the Engine feed at /proc/all_seer @ {EVENT_HZ:.2f}hz")
         l.info(f"process snapshots @ {PROC_HZ:.2f}hz")
         l.info(f"perf snapshots @ {PERF_HZ:.2f}Hz (emitted alongside proc snapshots)")
         l.debug(f"wire protocol version: {protocol.WIRE_VERSION_STR}", flush=True)
@@ -397,8 +425,6 @@ def main():
             max_bytes=max(PROC_QUEUE_MAX_BYTES, PERF_QUEUE_MAX_BYTES),
             lock=threading.Lock(),
         )
-        stop_event = threading.Event()
-
         def _event_queue_put_cb(q_obj, item_obj, item_bytes):
             _queue_put_drop_oldest(q_obj, event_queue_state, item_obj, item_bytes)
 
@@ -442,9 +468,16 @@ def main():
                                          stop_event)
         finally:
             stop_event.set()
-    except KeyboardInterrupt:
-        l.critical("CTRL-C")
-        sys.exit(1)
+            sender.close()
+            if event_thread is not None:
+                event_thread.join(timeout=1.0)
+            if snapshot_thread is not None:
+                snapshot_thread.join(timeout=1.0)
+    finally:
+        if prev_sigint is not None:
+            signal.signal(signal.SIGINT, prev_sigint)
+        if prev_sigterm is not None:
+            signal.signal(signal.SIGTERM, prev_sigterm)
 
 if __name__ == "__main__":
     main()

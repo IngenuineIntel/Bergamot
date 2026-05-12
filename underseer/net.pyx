@@ -18,6 +18,26 @@ cdef class Sender:
     cdef int max_frame_bytes
     cdef int sock_timeout_secs
 
+    cdef bint _backoff_wait(self, double delay_seconds, object stop_event):
+        cdef double deadline
+        cdef double remaining
+        if delay_seconds <= 0:
+            return True
+
+        if stop_event is None:
+            time.sleep(delay_seconds)
+            return True
+
+        deadline = time.monotonic() + delay_seconds
+        while True:
+            if stop_event.is_set():
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            if stop_event.wait(min(0.2, remaining)):
+                return False
+
     def __init__(self, str host, int port, int reconnect_max_seconds=30,
                  int max_frame_bytes=1_048_000, int sock_timeout_secs=5):
         self._host = host
@@ -29,7 +49,7 @@ cdef class Sender:
         self._backoff = 1.0
         self._system_info = collect_system_info()
 
-    cdef bint _connect(self):
+    cdef bint _connect(self, object stop_event=None):
         cdef object s
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -42,7 +62,8 @@ cdef class Sender:
                 self._close()
                 l.critical("failed to send system_info handshake", flush=True)
                 l.info(f"retrying in {self._backoff:.0f}s", flush=True)
-                time.sleep(self._backoff)
+                if not self._backoff_wait(self._backoff, stop_event):
+                    return False
                 self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
                 return False
             l.info(f"connected to {self._host}:{self._port}", flush=True)
@@ -50,13 +71,17 @@ cdef class Sender:
         except OSError as exc:
             l.error(f"connect failed: {exc}", flush=True)
             l.info(f"retrying in {self._backoff:.0f}s", flush=True)
-            time.sleep(self._backoff)
+            if not self._backoff_wait(self._backoff, stop_event):
+                return False
             self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
             return False
 
-    cpdef void connect(self):
-        while not self._connect():
-            pass
+    cpdef bint connect(self, object stop_event=None):
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            if self._connect(stop_event):
+                return True
 
     cpdef bint send_batch(self, list events):
         """
@@ -107,6 +132,9 @@ cdef class Sender:
             l.error(f"send error: {exc}", flush=True)
             self._close()
             return False
+
+    cpdef void close(self):
+        self._close()
 
     cdef void _close(self):
         if self._sock:

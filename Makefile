@@ -126,3 +126,22 @@ engine_test_workflow: allseer_test_workflow
 overseer_test_workflow:
 	sleep 5
 	wget http://localhost:27960
+
+# production freeze formulas
+agent_freeze:
+	-[[ -e $(UNDERSEER_PYENV) ]] || python3 -m venv $(UNDERSEER_PYENV)
+	-$(UNDERSEER_PYTHON) -m pip install -r $(UNDERSEER_DIR)/requirements.txt
+	cd $(UNDERSEER_DIR) && $(UNDERSEER_PYTHON) $(notdir $(UNDERSEER_SETUP)) build_ext --inplace
+	cd $(UNDERSEER_DIR) && printf '%s\n' 'from underseer import main' 'if __name__ == "__main__":' '    main()' > __freeze_entry__.py
+	-rm -rf $(UNDERSEER_DIR)/build/pyi-build
+	-rm -rf $(UNDERSEER_DIR)/build/pyi-spec
+	-rm -f ./bergamot-agent
+	cd $(UNDERSEER_DIR) && $(UNDERSEER_PYTHON) -m PyInstaller --onefile --clean --name bergamot-agent --distpath .. --workpath build/pyi-build --specpath build/pyi-spec --additional-hooks-dir ../pyinstaller_hooks --hidden-import interface --hidden-import workers --hidden-import protocol --hidden-import net --hidden-import procurement --hidden-import underseer --hidden-import queue --hidden-import contextlib --hidden-import dataclasses --hidden-import threading --hidden-import platform --hidden-import socket --hidden-import struct --hidden-import zlib --hidden-import datetime --hidden-import typing --hidden-import os --hidden-import sys --hidden-import time --hidden-import signal __freeze_entry__.py
+	chmod +x ./bergamot-agent
+	-rm -f $(UNDERSEER_DIR)/__freeze_entry__.py
+
+engine-freeze:
+	@mkdir -p $(MODULE_DIR)/build
+	$(MAKE) -C /lib/modules/$$(uname -r)/build M=$$(pwd)/allseer MO=$$(pwd)/allseer/build modules
+	-rm -f ./bergamot-engine
+	cp $(MODULE_DIR)/build/allseer_kmod.ko ./bergamot-engine

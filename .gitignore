@@ -14,5 +14,11 @@ underseer/*.c
 underseer/*.cpython*
 underseer/build
 
+# Agent build artifacts
+underseer/*.egg-info
+bergamot-agent
+pyinstaller_hooks
+bergamot-agent-dist
+
 # SQLite databases
 /overseer/db/*
