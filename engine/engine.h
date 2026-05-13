@@ -15,10 +15,10 @@
  *   ppid         -> ppid
  *   uid          -> uid
  *   type         -> type (stringified by engine in engine.c)
- *   subtype      -> subtype (future syscall minutia)
+ *   subtype      -> syscall identity within a grouped type (for example getid/getuid)
  *   comm         -> comm
  *   arg          -> arg / arg1
- *   arg2         -> arg2
+ *   arg2         -> arg2 (open uses symbolic O_* flags)
  *   retval       -> retval (syscall return value from kretprobe)
  */
 

@@ -493,13 +493,20 @@ if (hasProcTable || hasLifecycleFeed || hasDeadProcessesFeed) {
 function prependFeedRow(tbodyId, ev) {
   const tbody = tbodyId === "open-body" ? ui.openBody : ui.netBody;
   if (!tbody) return;
+  const isOpenFeed = tbodyId === "open-body";
 
   const tr = document.createElement("tr");
-  tr.innerHTML = `
+  tr.innerHTML = isOpenFeed ? `
     <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
     <td>${ev.pid}</td>
     <td>${esc(ev.comm)}</td>
-    <td class="arg-cell">${esc(ev.arg)}</td>
+    <td class="arg-cell">${esc(packetArg1(ev))}</td>
+    <td class="arg-cell">${esc(packetArg2(ev))}</td>
+  ` : `
+    <td>${fmtEventTs(ev.ts_s, ev.ts_ms, 3)}</td>
+    <td>${ev.pid}</td>
+    <td>${esc(ev.comm)}</td>
+    <td class="arg-cell">${esc(packetArg1(ev))}</td>
   `;
   tbody.insertBefore(tr, tbody.firstChild);
 

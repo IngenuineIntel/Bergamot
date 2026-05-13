@@ -141,6 +141,93 @@ static int as_copy_user_str(const char __user *uptr, char *dst, size_t dst_sz) {
 }
 #endif
 
+#if AS_HOOK_OPEN
+static void as_append_open_flag(char *dst, size_t dst_sz, bool *first,
+                                const char *name) {
+  size_t used;
+
+  if (!dst || !first || !name || dst_sz == 0)
+    return;
+
+  used = strlen(dst);
+  if (used >= dst_sz - 1)
+    return;
+
+  scnprintf(dst + used, dst_sz - used, "%s%s", *first ? "" : "|", name);
+  *first = false;
+}
+
+static void as_format_open_flags(u64 flags, char *dst, size_t dst_sz) {
+  bool first = true;
+
+  if (!dst || dst_sz == 0)
+    return;
+
+  dst[0] = '\0';
+
+  switch (flags & O_ACCMODE) {
+  case O_WRONLY:
+    as_append_open_flag(dst, dst_sz, &first, "O_WRONLY");
+    break;
+  case O_RDWR:
+    as_append_open_flag(dst, dst_sz, &first, "O_RDWR");
+    break;
+  default:
+    as_append_open_flag(dst, dst_sz, &first, "O_RDONLY");
+    break;
+  }
+
+  if (flags & O_CREAT)
+    as_append_open_flag(dst, dst_sz, &first, "O_CREAT");
+  if (flags & O_EXCL)
+    as_append_open_flag(dst, dst_sz, &first, "O_EXCL");
+  if (flags & O_NOCTTY)
+    as_append_open_flag(dst, dst_sz, &first, "O_NOCTTY");
+  if (flags & O_TRUNC)
+    as_append_open_flag(dst, dst_sz, &first, "O_TRUNC");
+  if (flags & O_APPEND)
+    as_append_open_flag(dst, dst_sz, &first, "O_APPEND");
+  if (flags & O_NONBLOCK)
+    as_append_open_flag(dst, dst_sz, &first, "O_NONBLOCK");
+  if (flags & O_DSYNC)
+    as_append_open_flag(dst, dst_sz, &first, "O_DSYNC");
+#ifdef O_ASYNC
+  if (flags & O_ASYNC)
+    as_append_open_flag(dst, dst_sz, &first, "O_ASYNC");
+#endif
+#ifdef O_DIRECT
+  if (flags & O_DIRECT)
+    as_append_open_flag(dst, dst_sz, &first, "O_DIRECT");
+#endif
+#ifdef O_LARGEFILE
+  if (flags & O_LARGEFILE)
+    as_append_open_flag(dst, dst_sz, &first, "O_LARGEFILE");
+#endif
+  if (flags & O_DIRECTORY)
+    as_append_open_flag(dst, dst_sz, &first, "O_DIRECTORY");
+  if (flags & O_NOFOLLOW)
+    as_append_open_flag(dst, dst_sz, &first, "O_NOFOLLOW");
+#ifdef O_NOATIME
+  if (flags & O_NOATIME)
+    as_append_open_flag(dst, dst_sz, &first, "O_NOATIME");
+#endif
+  if (flags & O_CLOEXEC)
+    as_append_open_flag(dst, dst_sz, &first, "O_CLOEXEC");
+#ifdef O_SYNC
+  if (flags & O_SYNC)
+    as_append_open_flag(dst, dst_sz, &first, "O_SYNC");
+#endif
+#ifdef O_PATH
+  if (flags & O_PATH)
+    as_append_open_flag(dst, dst_sz, &first, "O_PATH");
+#endif
+#ifdef O_TMPFILE
+  if ((flags & O_TMPFILE) == O_TMPFILE)
+    as_append_open_flag(dst, dst_sz, &first, "O_TMPFILE");
+#endif
+}
+#endif
+
 /* ════════════════════════════════════════════════════════════════════════════
  * HOOK: open (do_sys_openat2)
  * Captures every file-open/file-create syscall.
@@ -153,9 +240,14 @@ static int as_copy_user_str(const char __user *uptr, char *dst, size_t dst_sz) {
 #if AS_HOOK_OPEN
 int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
   const char __user *upath = (const char __user *)regs->si;
+  const void *khow = (const void *)regs->dx;
+  const void __user *uhow = (const void __user *)regs->dx;
   int dfd = (int)regs->di;
+  u64 flags = 0;
+  bool have_flags = false;
   char path[256];
   char arg[256];
+  char arg2[256];
 
   AS_HOOK_GUARD();
 
@@ -163,8 +255,17 @@ int as_probe_openat2(struct kprobe *p, struct pt_regs *regs) {
     return 0;
 
   snprintf(arg, sizeof(arg), "dfd=%d path=%s", dfd, path);
+  if (khow && copy_from_kernel_nofault(&flags, khow, sizeof(flags)) == 0)
+    have_flags = true;
+  else if (uhow && copy_from_user(&flags, uhow, sizeof(flags)) == 0)
+    have_flags = true;
 
-  as_emit_event(AS_TYPE_OPEN, "do_sys_openat2", arg);
+  if (have_flags)
+    as_format_open_flags(flags, arg2, sizeof(arg2));
+  else
+    arg2[0] = '\0';
+
+  as_emit_event2(AS_TYPE_OPEN, "do_sys_openat2", arg, arg2);
   return 0;
 }
 #endif /* AS_HOOK_OPEN */
