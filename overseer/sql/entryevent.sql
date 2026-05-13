@@ -2,7 +2,7 @@
 -- adding a new event
 
 INSERT INTO events (
-    ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2
+    ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2, retval
 ) VALUES (
     :ts_s,
     :ts_ms,
@@ -13,5 +13,6 @@ INSERT INTO events (
     :subtype,
     :comm,
     :arg1,
-    :arg2
+    :arg2,
+    :retval
 );

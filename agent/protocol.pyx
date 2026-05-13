@@ -58,9 +58,11 @@ def encode_event_payload(obj: dict) -> bytes:
     pid = int(obj.get("pid", 0) or 0)
     ppid = int(obj.get("ppid", 0) or 0)
     uid = int(obj.get("uid", 0) or 0)
+    retval = int(obj.get("retval", 0) or 0)
 
     return b"".join([
         struct.pack("!qHiiiB", ts_s, ts_ms, pid, ppid, uid, type_id),
+        struct.pack("!q", retval),
         _pack_str(obj.get("subtype", "")),
         _pack_str(obj.get("comm", "")),
         _pack_str(obj.get("arg1", obj.get("arg", ""))),

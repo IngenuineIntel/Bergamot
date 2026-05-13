@@ -105,11 +105,27 @@ def _decode_event(payload: bytes):
     if len(payload) < base_sz:
         raise ValueError("short event header")
     ts_s, ts_ms, pid, ppid, uid, type_id = struct.unpack("!qHiiiB", payload[:base_sz])
-    pos = base_sz
-    subtype, pos = _read_str(payload, pos)
-    comm, pos = _read_str(payload, pos)
-    arg1, pos = _read_str(payload, pos)
-    arg2, pos = _read_str(payload, pos)
+    retval = 0
+
+    def _decode_event_fields(start_pos: int):
+        field_pos = start_pos
+        subtype_val, field_pos = _read_str(payload, field_pos)
+        comm_val, field_pos = _read_str(payload, field_pos)
+        arg1_val, field_pos = _read_str(payload, field_pos)
+        arg2_val, field_pos = _read_str(payload, field_pos)
+        if field_pos != len(payload):
+            raise ValueError("trailing event payload bytes")
+        return subtype_val, comm_val, arg1_val, arg2_val
+
+    retval_sz = struct.calcsize("!q")
+    try:
+        if len(payload) < base_sz + retval_sz:
+            raise ValueError("short retval field")
+        retval, = struct.unpack("!q", payload[base_sz:base_sz + retval_sz])
+        subtype, comm, arg1, arg2 = _decode_event_fields(base_sz + retval_sz)
+    except ValueError:
+        retval = 0
+        subtype, comm, arg1, arg2 = _decode_event_fields(base_sz)
 
     ev_type = WIRE_TYPE_MAP.get(type_id, "unknown")
     out_arg2 = arg2
@@ -131,6 +147,7 @@ def _decode_event(payload: bytes):
         "arg": arg1,
         "arg1": arg1,
         "arg2": out_arg2,
+        "retval": int(retval),
     }
 
 

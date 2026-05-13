@@ -44,7 +44,8 @@ CREATE TABLE events (
     arg1 TEXT, -- syscall argument (usually *rdi)
     -- No other implementation of the protocol has `arg2` - but one
     -- day they might
-    arg2 TEXT -- syscall argument (usually *rsi)
+    arg2 TEXT, -- syscall argument (usually *rsi)
+    retval INTEGER -- syscall return (rax when we're back in usermode)
 );
 
 CREATE TABLE procs (

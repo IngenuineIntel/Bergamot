@@ -5,9 +5,9 @@
  * Interface contract across components:
  *   hooks.c produces struct as_event via as_emit_event().
  *   engine (engine.c) drains struct as_event to procfs line format:
- *     <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
+ *     <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\t<retval>
  *   agent parses that line into JSON keys:
- *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
+ *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2, retval
  *
  * Field mapping:
  *   timestamp_ns -> ts_s + ts_ms
@@ -19,6 +19,7 @@
  *   comm         -> comm
  *   arg          -> arg / arg1
  *   arg2         -> arg2
+ *   retval       -> retval (syscall return value from kretprobe)
  */
 
 #ifndef ENGINE_H
@@ -56,6 +57,7 @@ struct as_event {
   char comm[TASK_COMM_LEN]; /* process name (≤15 chars + NUL)      */
   char arg[256];            /* filename / argv[0] / "IP:port"      */
   char arg2[256];           /* optional secondary syscall argument  */
+  long retval;              /* syscall return value (0 = pending)   */
 };
 
 /* ── Shared function declared in engine.c, called from hooks.c ──────── */

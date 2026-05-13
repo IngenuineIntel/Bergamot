@@ -7,7 +7,7 @@
  *      /api/stream with event types: event, stats, ping
  *
  * Payload schemas:
- *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2}
+ *   Raw syscall events: {ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2, retval}
  *   Process snapshots: {kind: "rich_proc_snapshot", ts_s, ts_ms, processes: [...]}
  *   System perf: {kind: "system_perf", ts_s, ts_ms, cores, mem, load}
  */
@@ -537,6 +537,11 @@ function packetArg2(ev) {
   return "";
 }
 
+function packetRetval(ev) {
+  if (ev?.retval != null) return ev.retval;
+  return "";
+}
+
 function prependEventRow(ev) {
   if (!ui.syscallsBody || !ev || typeof ev !== "object") return;
 
@@ -550,6 +555,7 @@ function prependEventRow(ev) {
     <td>${esc(ev.comm ?? "")}</td>
     <td class="arg-cell">${esc(packetArg1(ev))}</td>
     <td class="arg-cell">${esc(packetArg2(ev))}</td>
+    <td>${esc(packetRetval(ev))}</td>
   `;
   ui.syscallsBody.insertBefore(tr, ui.syscallsBody.firstChild);
 
@@ -1060,7 +1066,7 @@ async function loadSnapshot() {
 
   if (hasSyscallsFeed) {
     tasks.push(
-      fetch("/api/events")
+      fetch("/api/events/db")
         .then((r) => r.json())
         .then((events) => {
           [...events].reverse().forEach((ev) => prependEventRow(ev));

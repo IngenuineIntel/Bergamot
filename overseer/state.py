@@ -225,7 +225,7 @@ class EventStore:
 
         now = time.monotonic()
         elapsed = now - self._last_commit_mono
-        should_commit = force or (self._pending_writes >= 100 and elapsed >= 2.0)
+        should_commit = force or self._pending_writes >= 100 or elapsed >= 2.0
         if not should_commit:
             return
 
@@ -327,6 +327,7 @@ class EventStore:
             "comm": comm,
             "arg1": arg1,
             "arg2": arg2,
+            "retval": int(ev.get("retval", 0) or 0),
             # Keep legacy key for existing UI/client code paths.
             "arg": arg1,
         }
@@ -398,6 +399,7 @@ class EventStore:
             "arg1": str(ev.get("arg1", ev.get("arg", "")) or ""),
             "arg2": ev.get("arg2", "") if isinstance(ev.get("arg2", ""), int)
             else str(ev.get("arg2", "") or ""),
+            "retval": int(ev.get("retval", 0) or 0),
         }
 
         try:
@@ -792,7 +794,7 @@ class EventStore:
                 where_clause = " WHERE " + " AND ".join(where)
 
             sql = (
-                "SELECT id, ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2 "
+                "SELECT id, ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2, retval "
                 "FROM events"
                 f"{where_clause} "
                 "ORDER BY id DESC "
@@ -815,6 +817,7 @@ class EventStore:
                 "comm": row[8],
                 "arg1": row[9] or "",
                 "arg2": row[10] or "",
+                "retval": row[11] or 0,
                 # Legacy compatibility for existing readers expecting one arg.
                 "arg": row[9] or "",
             })
@@ -930,6 +933,7 @@ class EventStore:
         while True:
             start = time.perf_counter()
             with self._lock:
+                self._flush_commits_locked(force=False)
                 if self.is_agent:
                     self.conn_uptime += 1
                 else:

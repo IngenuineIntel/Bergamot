@@ -104,7 +104,7 @@ cdef object parse_line(str line):
         Parse one procfs event line.
 
         Preferred format (tab-separated):
-            <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
+            <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\t<retval>
 
         Legacy format (space-separated):
             <ts_ns> <pid> <ppid> <uid> <type> <subtype> <comm> <arg>
@@ -122,7 +122,9 @@ cdef object parse_line(str line):
     cdef str comm
     cdef str arg1
     cdef str arg2
+    cdef str retval_raw
     cdef object arg2_value
+    cdef object retval_value
     cdef str arg_legacy
     cdef long long ts_ns
     cdef long long ts_s
@@ -134,7 +136,7 @@ cdef object parse_line(str line):
         return None
 
     if "\t" in line:
-        parts = line.split("\t", 8)
+        parts = line.split("\t", 9)
         if len(parts) < 9:
             return None
 
@@ -149,6 +151,7 @@ cdef object parse_line(str line):
         comm = parts[6]
         arg1 = parts[7]
         arg2 = parts[8]
+        retval_raw = parts[9] if len(parts) > 9 else "0"
     else:
         parts = line.split(None, 7)
         if len(parts) < 8:
@@ -167,6 +170,7 @@ cdef object parse_line(str line):
         arg_legacy = parts[7]
         arg1 = arg_legacy
         arg2 = ""
+        retval_raw = "0"
 
         # Transitional parsing: if arg was encoded as "arg1=<x> arg2=<y>", split it.
         if arg_legacy.startswith("arg1="):
@@ -187,6 +191,8 @@ cdef object parse_line(str line):
             except ValueError:
                 arg2_value = arg2
 
+        retval_value = int(retval_raw)
+
         return {
             "ts_s": int(ts_s),
             "ts_ms": int(rem_ns // 1_000_000),
@@ -199,6 +205,7 @@ cdef object parse_line(str line):
             "arg": arg1,
             "arg1": arg1,
             "arg2": arg2_value,
+            "retval": retval_value,
         }
     except ValueError:
         return None

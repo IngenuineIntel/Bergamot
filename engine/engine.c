@@ -17,6 +17,7 @@
 #include <linux/atomic.h>
 #include <linux/fs.h>
 #include <linux/init.h>
+#include <linux/hashtable.h>
 #include <linux/kernel.h>
 #include <linux/kfifo.h>
 #include <linux/kprobes.h>
@@ -27,6 +28,7 @@
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/seq_file.h>
+#include <linux/slab.h>
 #include <linux/spinlock.h>
 
 #include "engine.h"
@@ -121,6 +123,83 @@ MODULE_VERSION("0.1");
 static DEFINE_KFIFO(as_fifo, struct as_event, AS_FIFO_SIZE);
 static DEFINE_SPINLOCK(as_fifo_lock);
 
+/* ── PER-TASK PENDING EVENT SLOTS ───────────────────────────────────────── */
+/*
+ * Return probes may run after the task has migrated to another CPU, so pending
+ * events must be keyed by task identity rather than CPU identity.
+ */
+#define AS_PENDING_HASH_BITS 8
+
+struct as_pending_event_entry {
+  pid_t pid;
+  struct as_event ev;
+  struct hlist_node node;
+};
+
+static DEFINE_HASHTABLE(as_pending_events, AS_PENDING_HASH_BITS);
+static DEFINE_SPINLOCK(as_pending_lock);
+
+static void as_store_pending_event(const struct as_event *ev) {
+  struct as_pending_event_entry *entry;
+  unsigned long flags;
+  pid_t pid = current->pid;
+
+  spin_lock_irqsave(&as_pending_lock, flags);
+  hash_for_each_possible(as_pending_events, entry, node, (u32)pid) {
+    if (entry->pid == pid) {
+      entry->ev = *ev;
+      spin_unlock_irqrestore(&as_pending_lock, flags);
+      return;
+    }
+  }
+  spin_unlock_irqrestore(&as_pending_lock, flags);
+
+  entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+  if (!entry)
+    return;
+
+  entry->pid = pid;
+  entry->ev = *ev;
+
+  spin_lock_irqsave(&as_pending_lock, flags);
+  hash_add(as_pending_events, &entry->node, (u32)pid);
+  spin_unlock_irqrestore(&as_pending_lock, flags);
+}
+
+static bool as_take_pending_event(struct as_event *out_ev) {
+  struct as_pending_event_entry *entry;
+  unsigned long flags;
+  pid_t pid = current->pid;
+
+  spin_lock_irqsave(&as_pending_lock, flags);
+  hash_for_each_possible(as_pending_events, entry, node, (u32)pid) {
+    if (entry->pid == pid) {
+      *out_ev = entry->ev;
+      hash_del(&entry->node);
+      spin_unlock_irqrestore(&as_pending_lock, flags);
+      kfree(entry);
+      return true;
+    }
+  }
+  spin_unlock_irqrestore(&as_pending_lock, flags);
+
+  return false;
+}
+
+static void as_clear_pending_events(void) {
+  struct as_pending_event_entry *entry;
+  struct hlist_node *tmp;
+  unsigned long flags;
+  int bucket;
+
+  spin_lock_irqsave(&as_pending_lock, flags);
+  hash_for_each_safe(as_pending_events, bucket, tmp, entry, node) {
+    hash_del(&entry->node);
+    kfree(entry);
+  }
+  spin_unlock_irqrestore(&as_pending_lock, flags);
+}
+
 /*
  * Shared guard flags referenced by hooks.c as extern symbols:
  *   - as_ready: set only after init completes and probes are registered
@@ -146,7 +225,6 @@ static bool as_type_has_multiple_subtypes(enum as_event_type type) {
 void as_emit_event2(enum as_event_type type, const char *subtype,
                     const char *arg, const char *arg2) {
   struct as_event ev;
-  unsigned long flags;
   const char *effective_subtype;
 
   /* Drop events until module init completes and collection is active. */
@@ -172,16 +250,9 @@ void as_emit_event2(enum as_event_type type, const char *subtype,
   ev.arg[sizeof(ev.arg) - 1] = '\0';
   strncpy(ev.arg2, arg2 ? arg2 : "", sizeof(ev.arg2) - 1);
   ev.arg2[sizeof(ev.arg2) - 1] = '\0';
+  ev.retval = 0;  /* Placeholder; will be filled by kretprobe */
 
-  spin_lock_irqsave(&as_fifo_lock, flags);
-  /* If the fifo is full, drop the oldest entry to make room. */
-  if (kfifo_is_full(&as_fifo)) {
-    struct as_event discard;
-    bool dropped = kfifo_get(&as_fifo, &discard);
-    (void)dropped;
-  }
-  kfifo_put(&as_fifo, ev);
-  spin_unlock_irqrestore(&as_fifo_lock, flags);
+  as_store_pending_event(&ev);
 }
 EXPORT_SYMBOL(as_emit_event2);
 
@@ -191,7 +262,39 @@ void as_emit_event(enum as_event_type type, const char *subtype,
 }
 EXPORT_SYMBOL(as_emit_event);
 
-/* ── END KFIFO RING BUFFER ──────────────────────────────────────────────── */
+/* ── KRETPROBE HANDLER ──────────────────────────────────────────────────── */
+/* Generic kretprobe handler for all syscalls. Captures return value from
+ * RAX register and emits the pending event to kfifo.
+ */
+static int as_kretprobe_handler(struct kretprobe_instance *ri,
+                                 struct pt_regs *regs) {
+  struct as_event ev;
+  unsigned long flags;
+
+  if (!atomic_read(&as_ready) || !atomic_read(&as_collecting))
+    return 0;
+
+  if (!as_take_pending_event(&ev))
+    return 0;
+
+  /* Capture return value from RAX register */
+  ev.retval = regs_return_value(regs);
+
+  /* Emit to kfifo */
+  spin_lock_irqsave(&as_fifo_lock, flags);
+  if (kfifo_is_full(&as_fifo)) {
+    struct as_event discard;
+    bool dropped = kfifo_get(&as_fifo, &discard);
+    (void)dropped;
+  }
+  kfifo_put(&as_fifo, ev);
+  spin_unlock_irqrestore(&as_fifo_lock, flags);
+
+  return 0;
+}
+
+/* ── END KRETPROBE HANDLER ──────────────────────────────────────────────– */
+
 
 /* ── PROCFS INTERFACE ───────────────────────────────────────────────────── */
 
@@ -350,10 +453,10 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
    * bytes, identical to an empty file.
    *
   * Procfs line contract emitted to Under-Seer:
-  *   <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\n
+  *   <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\t<retval>\n
    *
    * Under-Seer maps these fields into JSON keys:
-  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
+  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2, retval
    */
 
   struct as_event ev;
@@ -374,12 +477,12 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     }
     spin_unlock_irqrestore(&as_fifo_lock, flags);
 
-    len = snprintf(line, sizeof(line), "%llu\t%d\t%d\t%u\t%s\t%s\t%s\t%s\t%s\n",
+    len = snprintf(line, sizeof(line), "%llu\t%d\t%d\t%u\t%s\t%s\t%s\t%s\t%s\t%ld\n",
                    (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
                    (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
                        ? as_type_str[ev.type]
                        : "unknown",
-             ev.subtype, ev.comm, ev.arg, ev.arg2);
+             ev.subtype, ev.comm, ev.arg, ev.arg2, ev.retval);
 
     if (len <= 0)
       continue;
@@ -684,7 +787,205 @@ static struct kprobe as_kprobes[] = {
 
 static int as_num_probes = ARRAY_SIZE(as_kprobes);
 
-/* ── END KPROBE DECLARATIONS ────────────────────────────────────────────── */
+/* ── KRETPROBE DECLARATIONS ─────────────────────────────────────────────── */
+/* For each kprobe, we have a matching kretprobe to capture return values.
+ * The handler is generic; it fetches the pending event from per-CPU storage.
+ */
+static struct kretprobe as_kretprobes[] = {
+#if AS_HOOK_OPEN
+    {
+        .kp.symbol_name = "do_sys_openat2",
+        .handler = as_kretprobe_handler,
+        .maxactive = 0,  /* no limit */
+    },
+#endif
+#if AS_HOOK_FORK
+    {
+        .kp.symbol_name = "kernel_clone",
+        .handler = as_kretprobe_handler,
+        .maxactive = 0,
+    },
+#endif
+#if AS_HOOK_CONNECT
+    {
+        .kp.symbol_name = "tcp_connect",
+        .handler = as_kretprobe_handler,
+        .maxactive = 0,
+    },
+#endif
+#if AS_HOOK_ACCEPT && AS_SYM_X64_SYS_ACCEPT4
+  {
+    .kp.symbol_name = "__x64_sys_accept4",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_UNLINK && AS_SYM_X64_SYS_UNLINKAT
+  {
+    .kp.symbol_name = "__x64_sys_unlinkat",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_RENAME && AS_SYM_X64_SYS_RENAMEAT2
+  {
+    .kp.symbol_name = "__x64_sys_renameat2",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETUID
+  {
+    .kp.symbol_name = "__x64_sys_setuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETUID && AS_SYM_X64_SYS_SETRESUID
+  {
+    .kp.symbol_name = "__x64_sys_setresuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETGID
+  {
+    .kp.symbol_name = "__x64_sys_setgid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETRESGID
+  {
+    .kp.symbol_name = "__x64_sys_setresgid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETGID && AS_SYM_X64_SYS_SETEGID
+  {
+    .kp.symbol_name = "__x64_sys_setegid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETREUID
+  {
+    .kp.symbol_name = "__x64_sys_setreuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_SETREUID && AS_SYM_X64_SYS_SETEUID
+  {
+    .kp.symbol_name = "__x64_sys_seteuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_CAPSET && AS_SYM_X64_SYS_CAPSET
+  {
+    .kp.symbol_name = "__x64_sys_capset",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_KEYCTL && AS_SYM_X64_SYS_KEYCTL
+  {
+    .kp.symbol_name = "__x64_sys_keyctl",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_PTRACE && AS_SYM_X64_SYS_PTRACE
+  {
+    .kp.symbol_name = "__x64_sys_ptrace",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETUID
+  {
+    .kp.symbol_name = "__x64_sys_getuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEUID
+  {
+    .kp.symbol_name = "__x64_sys_geteuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETGID
+  {
+    .kp.symbol_name = "__x64_sys_getgid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETEGID
+  {
+    .kp.symbol_name = "__x64_sys_getegid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESUID
+  {
+    .kp.symbol_name = "__x64_sys_getresuid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETUID_FAMILY && AS_SYM_X64_SYS_GETRESGID
+  {
+    .kp.symbol_name = "__x64_sys_getresgid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPID
+  {
+    .kp.symbol_name = "__x64_sys_getpid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPPID
+  {
+    .kp.symbol_name = "__x64_sys_getppid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETTID
+  {
+    .kp.symbol_name = "__x64_sys_gettid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETPGID
+  {
+    .kp.symbol_name = "__x64_sys_getpgid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+#if AS_HOOK_GETPID_FAMILY && AS_SYM_X64_SYS_GETSID
+  {
+    .kp.symbol_name = "__x64_sys_getsid",
+    .handler = as_kretprobe_handler,
+    .maxactive = 0,
+  },
+#endif
+};
+
+static int as_num_kretprobes = ARRAY_SIZE(as_kretprobes);
+
+/* ── END KRETPROBE DECLARATIONS ────────────────────────────────────────── */
 
 /* ── INIT/EXIT ──────────────────────────────────────────────────────────── */
 
@@ -709,6 +1010,26 @@ static int __init bergamot_engine_init(void) {
 
       /* Unwind already-registered probes */
       while (--i >= 0)
+        unregister_kprobe(&as_kprobes[i]);
+
+      proc_remove(as_all_seer_entry);
+      return ret;
+    }
+  }
+
+  // registering all kretprobe hooks
+  for (i = 0; i < as_num_kretprobes; i++) {
+    ret = register_kretprobe(&as_kretprobes[i]);
+    if (ret < 0) {
+      pr_err("engine: register_kretprobe failed for %s (%d)\n",
+             as_kretprobes[i].kp.symbol_name, ret);
+
+      /* Unwind already-registered kretprobes */
+      while (--i >= 0)
+        unregister_kretprobe(&as_kretprobes[i]);
+
+      /* Also unwind kprobes */
+      for (i = 0; i < as_num_probes; i++)
         unregister_kprobe(&as_kprobes[i]);
 
       proc_remove(as_all_seer_entry);
@@ -772,6 +1093,12 @@ static void __exit bergamot_engine_exit(void) {
    * firing during the unregister window is a guaranteed no-op.
    */
   atomic_set(&as_ready, 0);
+
+  as_clear_pending_events();
+
+  // unregistering kretprobe hooks
+  for (i = 0; i < as_num_kretprobes; i++)
+    unregister_kretprobe(&as_kretprobes[i]);
 
   // unregistering kprobe hooks
   for (i = 0; i < as_num_probes; i++)
