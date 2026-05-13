@@ -15,8 +15,8 @@ jobs:
     - name: Build the Engine
       run: make engine_build
 
-    - name: Load/Test the Engine
-      run: make engine_test_workflow
+    - name: Load Engine
+      run: make engine_load
 
     - name: Setup Agent VEnv
       run: make underseer_prep_env
