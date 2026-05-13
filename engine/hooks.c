@@ -14,12 +14,6 @@
  * Buffering, ownership checks, procfs formatting, and control commands
  * live in the engine implementation (allseer.c).
  *
- * Adding a new hook:
- *   1. Write a new as_probe_<name>() pre-handler here.
- *   2. Add a matching #define AS_HOOK_<NAME> flag in hooks_config.h.
- *   3. Add a kprobe entry in the engine kprobes[] array (allseer.c), guarded by
- *      #if AS_HOOK_<NAME>.
- *
  * Guards at the top of each section mirror the flags in hooks_config.h
  * so that the compiler sees no dead code when a hook is disabled.
  */
@@ -39,7 +33,7 @@
 #include <linux/uaccess.h>
 #include <net/sock.h>
 
-#include "allseer.h"
+#include "engine.h"
 #include "switches.h"
 
 /*

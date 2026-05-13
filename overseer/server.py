@@ -235,7 +235,7 @@ def _decode_binary_frame(kind: int, payload: bytes):
 # around the framework already built
 
 def _handle_client(conn: socket.socket, addr):
-    """Handles current underseer agent connection until it dies."""
+    """Handles current agent connection until it dies."""
     print(f"[over-seer] agent connected from {addr}", flush=True)
     with store._lock:
         store.is_agent = True

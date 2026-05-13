@@ -1,25 +1,25 @@
 # Python venvs
 overseer/env
-underseer/env
+agent/env
 
 # Kmod build artifacts.
-allseer/build
-allseer/.module-common.o
+engine/build
+engine/.module-common.o
 bergamot_engine.ko
 
 # __pycache__'s
-**/__pycache__/
+overseer/__pycache__
 
 # Cython artifacts
-underseer/*.c
-underseer/*.cpython*
-underseer/build
+agent/*.c
+agent/*.cpython*
+agent/build
 
 # Agent build artifacts
-underseer/*.egg-info
+agent/*.egg-info
 pyinstaller_hooks
 bergamot-agent-dist
 bergamot-agent
 
 # SQLite databases
-/overseer/db
+/overseer/db/*

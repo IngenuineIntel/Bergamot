@@ -1,14 +1,8 @@
-// allseer.c
+// engine.c
 // All-Seer kernel module core
 // (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
 /*
- * Component boundary: kernel -> userspace handoff.
- *   - hooks.c emits normalized events into kfifo via as_emit_event().
- *   - /proc/all_seer exposes drained kfifo events as one text line each.
- *   - underseer.py consumes those lines, maps fields to JSON, and forwards
- *     them over TCP to Over-Seer.
- *
  * Responsibilities:
  *   - kfifo ring buffer + as_emit_event() called from hooks.c
  *   - as_ready flag: hooks are no-ops until module is fully initialised
@@ -33,7 +27,7 @@
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
 
-#include "allseer.h"
+#include "engine.h"
 #include "switches.h"
 
 /*
@@ -692,7 +686,7 @@ static int as_num_probes = ARRAY_SIZE(as_kprobes);
 
 /* ── INIT/EXIT ──────────────────────────────────────────────────────────── */
 
-static int __init allseer_init(void) {
+static int __init bergamot_engine_init(void) {
   int ret, i;
 
   // registering /proc/all_seer
@@ -768,7 +762,7 @@ static int __init allseer_init(void) {
   return 0;
 }
 
-static void __exit allseer_exit(void) {
+static void __exit bergamot_engine_exit(void) {
   int i;
 
   /*
@@ -792,7 +786,7 @@ static void __exit allseer_exit(void) {
   pr_info("engine: unloaded\n");
 }
 
-module_init(allseer_init);
-module_exit(allseer_exit);
+module_init(bergamot_engine_init);
+module_exit(bergamot_engine_exit);
 
 /* ── END INIT/EXIT ──────────────────────────────────────────────────────── */

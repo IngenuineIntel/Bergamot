@@ -18,7 +18,7 @@ jobs:
     - name: Load/Test the Engine
       run: make engine_test_workflow
 
-    - name: Setup Underseer VEnv
+    - name: Setup Agent VEnv
       run: make underseer_prep_env
 
     - name: Setup Overseer VENV
@@ -30,11 +30,11 @@ jobs:
     - name: Check for Overseer webpage
       run: make overseer_test_workflow
 
-    - name: Build Underseer
-      run: make underseer_build
+    - name: Build Agent
+      run: make agent_freeze
 
-    - name: Run Underseer
-      run: make underseer_run &
+    - name: Run Agent
+      run: make ./bergamot-agent
 
     - name: Stop Everything
       continue-on-error: true

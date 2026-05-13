@@ -8,6 +8,6 @@ setup(
         "protocol.pyx",
         "net.pyx",
         "workers.pyx",
-        "underseer.pyx",
+        "main.pyx",
     ])
 )
