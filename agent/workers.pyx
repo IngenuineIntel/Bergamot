@@ -7,7 +7,8 @@ import time
 from interface import l
 
 def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
-                     wire_batch_max_bytes, size_bytes_cb, parse_line_cb, queue_put_cb):
+                     wire_batch_max_bytes, size_bytes_cb, parse_line_cb,
+                     queue_put_cb, reload_module_cb=None):
     lease_announced = False
     next_poll_at = time.monotonic()
     error_backoff_seconds = 0.2
@@ -48,6 +49,11 @@ def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
         except FileNotFoundError:
             l.critical(f"{proc_path} unavalible")
             l.debug("either another process has already claimed it, or the module's not loaded", flush=True)
+            if reload_module_cb is not None:
+                try:
+                    reload_module_cb()
+                except Exception as exc:
+                    l.warning(f"module reload attempt failed: {exc}", flush=True)
             time.sleep(5)
             continue
         except OSError as exc:

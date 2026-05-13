@@ -14,6 +14,7 @@ cdef int MAX_FRAME_BYTES
 cdef int RECONNECT_MAX_SECONDS
 cdef int SOCKET_TIMEOUT_SECONDS
 cdef str PROC_PATH
+cdef bool HAVE_LOADED_ENGINE_LOCALLY
 # ── END CYTHON CDEFS ─────────────────────────────────────────────────────── #
 
 BERGAMOT_VERSION = "1.0"
@@ -22,6 +23,7 @@ import contextlib
 from dataclasses import dataclass
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -51,7 +53,12 @@ SOCKET_TIMEOUT_SECONDS = 5
 
 # ── GLOBALS ──────────────────────────────────────────────────────────────── #
 
-PROC_PATH = "/proc/all_seer"
+# In the event the Agent tries to load the Engine, this marks whether it has
+# tried previously. It will not allow itself to try more than once, because it
+# loads based on the assumption the module file is installed in the kernel,
+# which is not always true.
+HAVE_LOADED_ENGINE_LOCALLY = False
+PROC_PATH = "/proc/bergamot-pipe"
 
 # minimum values to prevent breakage
 if EVENT_HZ <= 0:
@@ -357,6 +364,41 @@ def collect_all_snapshots() -> list:
     """Return both rich_proc_snapshot and system_perf as a list for the snapshot worker."""
     return [collect_process_snapshot(), collect_system_perf()]
 
+
+def _reload_engine_module():
+
+    if HAVE_LOADED_ENGINE_LOCALLY:
+        l.critical("reload has already been attempted, calling it quits", flush=True, exitcode=1)
+
+    l.warning("reloading bergamot_engine module in an attempt to access it...", flush=True)
+
+    rm = subprocess.run(
+        ["rmmod", "bergamot_engine"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if rm.returncode != 0:
+        stderr = (rm.stderr or "").strip()
+        # Treat 'not currently loaded' as non-fatal before modprobe.
+        if "not currently loaded" not in stderr:
+            l.warning(f"rmmod bergamot_engine failed: {stderr or rm.returncode}", flush=True)
+
+    mp = subprocess.run(
+        ["modprobe", "bergamot_engine"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if mp.returncode != 0:
+        l.critical(
+            f"modprobe bergamot_engine failed: {(mp.stderr or '').strip() or mp.returncode}",
+            flush=True,
+        )
+        return
+
+    l.info("module reload complete: bergamot_engine", flush=True)
+
 # ── Main poll loop ────────────────────────────────────────────────────────────
 
 def main():
@@ -390,7 +432,7 @@ def main():
         snapshot_interval = 1 / PROC_HZ
 
 
-        l.info(f"polling the Engine feed at /proc/all_seer @ {EVENT_HZ:.2f}hz")
+        l.info(f"polling the Engine feed at {PROC_PATH} @ {EVENT_HZ:.2f}hz")
         l.info(f"process snapshots @ {PROC_HZ:.2f}hz")
         l.info(f"perf snapshots @ {PERF_HZ:.2f}Hz (emitted alongside proc snapshots)")
         l.debug(f"wire protocol version: {protocol.WIRE_VERSION_STR}", flush=True)
@@ -424,6 +466,7 @@ def main():
                 protocol.event_frame_size_bytes,
                 parse_line,
                 _event_queue_put_cb,
+                _reload_engine_module,
             ),
             daemon=True,
             name="bergamot-agent-event-reader",

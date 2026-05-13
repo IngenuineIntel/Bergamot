@@ -1,5 +1,5 @@
 // hooks.c
-// kprobe pre-handler implementations for All-Seer
+// kprobe pre-handler implementations for Bergamot Engine
 // (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
 /*
@@ -7,12 +7,12 @@
  *   1) Kernel syscall path triggers a kprobe handler in this file.
  *   2) Handler checks shared guards (as_ready, as_collecting).
  *   3) Handler calls as_emit_event(type, subtype, arg).
- *   4) engine (allseer.c) pushes event to kfifo.
- *   5) agent drains kfifo entries by reading /proc/all_seer.
+ *   4) engine (engine.c) pushes event to kfifo.
+ *   5) agent drains kfifo entries by reading /proc/bergamot-pipe.
  *
  * This file owns syscall-argument extraction only.
  * Buffering, ownership checks, procfs formatting, and control commands
- * live in the engine implementation (allseer.c).
+ * live in the engine implementation (engine.c).
  *
  * Guards at the top of each section mirror the flags in hooks_config.h
  * so that the compiler sees no dead code when a hook is disabled.
@@ -37,7 +37,7 @@
 #include "switches.h"
 
 /*
- * Guards declared in allseer.c. Each engine handler checks them before doing
+ * Guards declared in engine.c. Each engine handler checks them before doing
  * any work so that probe firings during module init/exit are no-ops.
  */
 extern atomic_t as_ready;

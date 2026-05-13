@@ -1,10 +1,10 @@
-// allseer.h
+// engine.h
 // (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
 /*
  * Interface contract across components:
  *   hooks.c produces struct as_event via as_emit_event().
- *   engine (allseer.c) drains struct as_event to procfs line format:
+ *   engine (engine.c) drains struct as_event to procfs line format:
  *     <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>
  *   agent parses that line into JSON keys:
  *     ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2
@@ -14,15 +14,15 @@
  *   pid          -> pid
  *   ppid         -> ppid
  *   uid          -> uid
- *   type         -> type (stringified by engine in allseer.c)
+ *   type         -> type (stringified by engine in engine.c)
  *   subtype      -> subtype (future syscall minutia)
  *   comm         -> comm
  *   arg          -> arg / arg1
  *   arg2         -> arg2
  */
 
-#ifndef ALLSEER_H
-#define ALLSEER_H
+#ifndef ENGINE_H
+#define ENGINE_H
 
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -58,10 +58,10 @@ struct as_event {
   char arg2[256];           /* optional secondary syscall argument  */
 };
 
-/* ── Shared function declared in allseer.c, called from hooks.c ──────── */
+/* ── Shared function declared in engine.c, called from hooks.c ──────── */
 void as_emit_event(enum as_event_type type, const char *subtype,
                    const char *arg);
 void as_emit_event2(enum as_event_type type, const char *subtype,
                     const char *arg, const char *arg2);
 
-#endif /* ALLSEER_H */
+#endif /* ENGINE_H */

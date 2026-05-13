@@ -1,7 +1,7 @@
 #!/usr/bin/make
 # TODO
-obj-m += engine_kmod.o
-engine_kmod-objs := engine.o hooks.o
+obj-m += bergamot_engine.o
+bergamot_engine-objs := engine.o hooks.o
 
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 PWD   := $(shell pwd)

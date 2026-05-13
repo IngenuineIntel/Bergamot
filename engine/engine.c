@@ -2,11 +2,13 @@
 // All-Seer kernel module core
 // (c) 2026 IngenuineIntel <roan.rothrock@proton.me>
 
+#define PROCFILE "bergamot-pipe"
+
 /*
  * Responsibilities:
  *   - kfifo ring buffer + as_emit_event() called from hooks.c
  *   - as_ready flag: hooks are no-ops until module is fully initialised
- *   - Exclusive reader lock on /proc/all_seer
+ *   - Exclusive reader lock on /proc/bergamot-pipe
  *   - procfs interface (drains kfifo for the owner only)
  *   - kprobe registration / deregistration (entries #if-gated by
  * hooks_config.h)
@@ -110,7 +112,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IgenuineIntel");
-MODULE_DESCRIPTION("System Event Analytics");
+MODULE_DESCRIPTION("Bergamot Engine");
 MODULE_VERSION("0.1");
 
 /* ── KFIFO RING BUFFER ──────────────────────────────────────────────────── */
@@ -194,7 +196,7 @@ EXPORT_SYMBOL(as_emit_event);
 /* ── PROCFS INTERFACE ───────────────────────────────────────────────────── */
 
 /* Owner lease state
- * The first successful opener of /proc/all_seer claims a lease. If the
+ * The first successful opener of PROCFILE claims a lease. If the
  * opener's PPID is 1 (it called setsid, making init its parent), only that
  * exact PID holds the lease. Otherwise any process sharing the same PPID is
  * treated as part of the same owner scope.
@@ -341,7 +343,7 @@ static int as_proc_open(struct inode *inode, struct file *file) {
 
 static ssize_t as_proc_read(struct file *file, char __user *ubuf,
                                 size_t count, loff_t *ppos) {
-  /* Event handler for when `/proc/all_seer` is read.
+  /* Event handler for when `PROCFILE` is read.
    *
    * Custom read implementation: for the authorized owner we drain and
    * format the kfifo directly into the user buffer. Non-owners get 0
@@ -689,10 +691,10 @@ static int as_num_probes = ARRAY_SIZE(as_kprobes);
 static int __init bergamot_engine_init(void) {
   int ret, i;
 
-  // registering /proc/all_seer
-  as_all_seer_entry = proc_create("all_seer", 0400, NULL, &as_all_seer_ops);
+  // registering PROCFILE
+  as_all_seer_entry = proc_create(PROCFILE, 0400, NULL, &as_all_seer_ops);
   if (!as_all_seer_entry) {
-    pr_err("engine: failed to create /proc/all_seer\n");
+    pr_err("engine: failed to create /proc/bergamot-pipe\n");
     proc_remove(as_all_seer_entry);
 
     return -ENOMEM;

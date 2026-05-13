@@ -4,6 +4,8 @@
 SHELL := /bin/bash
 
 MODULE_DIR := ./engine
+MODULE_NAME := bergamot_engine
+MODULE_KO := ./$(MODULE_NAME).ko
 
 AGENT_DIR   := ./agent
 AGENT_PYENV := ./agent/env
@@ -58,21 +60,22 @@ agent_clean:
 engine_build:
 	@mkdir -p $(MODULE_DIR)/build
 	$(MAKE) -C /lib/modules/$$(uname -r)/build M=$$(pwd)/engine MO=$$(pwd)/engine/build modules
-	-rm -f ./bergamot_engine.ko
-	cp $(MODULE_DIR)/build/engine_kmod.ko ./bergamot_engine.ko
+	-rm -f $(MODULE_KO)
+	cp $(MODULE_DIR)/build/$(MODULE_NAME).ko $(MODULE_KO)
 
 engine_load:
-	sudo insmod ./bergamot_engine.ko || sudo modprobe bergamot_engine
+	sudo insmod $(abspath $(MODULE_KO))
 
 engine_unload:
-	sudo rmmod ./bergamot_engine.ko
+	sudo rmmod $(MODULE_NAME)
 
 engine_install: engine_build
 	@mkdir -p $(MODULE_DIR)/build
-	$(MAKE) -C /lib/modules/$$(uname -r)/build M=$$(pwd)/engine MO=$$(pwd)/engine/build modules
-	sudo install -D -m 0644 $(MODULE_KO) /lib/modules/$$(uname -r)/extra/bergamot_engine.ko
+	sudo install -D -m 0644 $(abspath $(MODULE_KO)) /lib/modules/$$(uname -r)/extra/$(MODULE_NAME).ko
+	-sudo rm -f /lib/modules/$$(uname -r)/extra/allseer_kmod.ko
+	-sudo rm -f /lib/modules/$$(uname -r)/extra/engine_kmod.ko
 	sudo depmod -a
-	# --> sudo modprobe bergamot_engine <-- run this one next!
+	# --> sudo modprobe $(MODULE_NAME) <-- run this one next!
 
 engine_clean:
 	rm -r engine/build engine/.module-common.o
