@@ -41,7 +41,7 @@ agent_prep_env:
 
 agent_freeze: agent_prep_env
 	cd $(AGENT_DIR) && $(AGENT_PYTHON) $(notdir $(AGENT_SETUP)) build_ext --inplace
-	cd $(AGENT_DIR) && printf '%s\n' 'from AGENT import main' 'if __name__ == "__main__":' '    main()' > __freeze_entry__.py
+	cd $(AGENT_DIR) && printf '%s\n' 'from agent import main' 'if __name__ == "__main__":' '    main()' > __freeze_entry__.py
 	-rm -rf $(AGENT_DIR)/build/pyi-build
 	-rm -rf $(AGENT_DIR)/build/pyi-spec
 	-rm -f ./bergamot-agent
