@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="overseer/static/bergamot_full_logo-512x512.png" alt="Bergamot Logo" width="100%">
+  <img src="overseer/static/bergamot_full_logo-512x512.png" alt="Bergamot Logo" width="50%">
 </p>
 
 BERGAMOT
