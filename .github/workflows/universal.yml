@@ -19,7 +19,7 @@ jobs:
       run: make engine_load
 
     - name: Setup Agent VEnv
-      run: make agent__prep_env
+      run: make agent_prep_env
 
     - name: Setup Overseer VENV
       run: make overseer_prep_env
