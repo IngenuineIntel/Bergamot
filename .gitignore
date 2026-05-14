@@ -24,3 +24,6 @@ __freeze_entry__.py
 
 # SQLite databases
 /overseer/db/*
+
+# personal notes
+.notes.md
