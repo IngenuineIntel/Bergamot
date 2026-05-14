@@ -1,0 +1,14 @@
+[over-seer] session db pending at /home/roan/Documents/active/Bergamot/overseer/db/9b8aca6a2f46472daa0dd3e51a4fa2ca-8f1651d7-1778725743.db; waiting for agent handshake
+ * Serving Flask app 'app'
+[overseer] TCP listener on 0.0.0.0:12046
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:27960
+ * Running on http://192.168.0.184:27960
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [13/May/2026 21:29:04] "GET / HTTP/1.1" 200 -
+[overseer] waiting for TCP connection from agent
+[overseer] connection accepted...
+[over-seer] agent connected from ('127.0.0.1', 45886)
+[over-seer] session db initialized at /home/roan/Documents/active/Bergamot/overseer/db/9b8aca6a2f46472daa0dd3e51a4fa2ca-8f1651d7-1778725743.db

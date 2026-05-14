@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
 from server import start_tcp_server
 from state import store
@@ -93,12 +93,15 @@ def _patched_add_event(ev: dict):
 store.add_event = _patched_add_event  # type: ignore[method-assign]
 
 
-# ── API routes ───────────────────────────────────────────────────────────────
+# ── ROUTES ───────────────────────────────────────────────────────────────── #
+
+#%% Webpages
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+#%% Graphs
 
 @app.route("/graph/events-per-sec")
 def graph_events_per_sec():
@@ -149,6 +152,7 @@ def graph_overview():
 def graph_dead_processes():
     return render_template("graph/dead_processes.html")
 
+#%% API
 
 @app.route("/api/stream")
 def api_stream():
@@ -308,6 +312,13 @@ def api_eps():
 def api_uptime():
     """Return uptime since oldest living agent connection (*new way*)"""
     return jsonify({"uptime": store.get_conn_uptime()})
+
+#%% Images
+
+@app.route("/favicon.ico")
+def favicon():
+    """Return the favicon"""
+    return send_from_directory("static/images", "favicon-32x32.ico")
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 def main():
