@@ -95,230 +95,25 @@ store.add_event = _patched_add_event  # type: ignore[method-assign]
 
 # ── ROUTES ───────────────────────────────────────────────────────────────── #
 
-#%% Webpages
+#%% HTML
 
 @app.route("/")
 def index():
     return render_template("index.html")
-
-#%% Graphs
-
-@app.route("/graph/events-per-sec")
-def graph_events_per_sec():
-    return render_template("graph/events_per_sec.html")
-
-
-@app.route("/graph/processes")
-def graph_processes():
-    return render_template("graph/processes.html")
-
-
-@app.route("/graph/file-opens")
-def graph_file_opens():
-    return render_template("graph/file_opens.html")
-
-
-@app.route("/graph/network")
-def graph_network():
-    return render_template("graph/network.html")
-
-
-@app.route("/graph/syscalls")
-def graph_syscalls():
-    return render_template("graph/syscalls.html")
-
-
-@app.route("/graph/fork")
-def graph_fork():
-    return render_template("graph/fork.html")
-
-
-@app.route("/graph/fork-exec")
-def graph_fork_exec():
-    return render_template("graph/fork_exec.html")
-
-
-@app.route("/graph/lifecycle")
-def graph_lifecycle():
-    return render_template("graph/lifecycle.html")
-
-
-@app.route("/graph/overview")
-def graph_overview():
-    return render_template("graph/overview.html")
-
-
-@app.route("/graph/dead-processes")
-def graph_dead_processes():
-    return render_template("graph/dead_processes.html")
-
-#%% API
-
-@app.route("/api/stream")
-def api_stream():
-    """
-    Server-Sent Events endpoint.  Clients receive:
-      - event: event  — every new raw event as it arrives
-      - event: ping   — keepalive every 15 s if no other traffic
-    """
-    def generate():
-        q = subscribe()
-        last_stats = time.monotonic()
-        last_ping  = time.monotonic()
-        try:
-            while True:
-                now = time.monotonic()
-
-                # Drain all queued events (non-blocking)
-                sent_any = False
-                while True:
-                    try:
-                        msg = q.get_nowait()
-                        yield f"event: event\ndata: {msg}\n\n"
-                        sent_any = True
-                    except queue.Empty:
-                        break
-                """
-                # Stats heartbeat — once per second
-                if now - last_stats >= 1.0:
-                    stats = json.dumps(store.get_stats())
-                    yield f"event: stats\ndata: {stats}\n\n"
-                    last_stats = now
-                    last_ping  = now
-                """
-                # Keepalive ping — if no traffic for 15 s
-                if now - last_ping >= 15.0:
-                    yield "event: ping\ndata: {}\n\n"
-                    last_ping = now
-
-                if not sent_any:
-                    time.sleep(0.05)   # 50 ms idle sleep
-
-        except GeneratorExit:
-            pass
-        finally:
-            unsubscribe(q)
-
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache",
-                             "X-Accel-Buffering": "no"})
-
-
-@app.route("/api/events")
-def api_events():
-    """Return the most recent 200 raw events (for initial page load)."""
-    return jsonify(store.get_recent_events(200))
-
-
-@app.route("/api/events/db")
-def api_events_db():
-    """Return persisted events from SQLite with optional type/subtype filters."""
-    raw_limit = request.args.get("limit", default=200, type=int)
-    raw_offset = request.args.get("offset", default=0, type=int)
-    ev_type = request.args.get("type", default=None, type=str)
-    subtype = request.args.get("subtype", default=None, type=str)
-
-    limit = max(1, min(raw_limit, 5000))
-    offset = max(0, raw_offset)
-
-    rows = store.get_persisted_events(
-        limit=limit,
-        offset=offset,
-        ev_type=(ev_type or "").strip() or None,
-        subtype=(subtype or "").strip() or None,
-    )
-    return jsonify(rows)
-
-
-@app.route("/api/processes")
-def api_processes():
-    """Return the current process table snapshot."""
-    return jsonify(store.get_processes())
-
-
-
-@app.route("/api/system-perf")
-def api_system_perf():
-    """Return the latest system performance snapshot (CPU, RAM, load avg)."""
-    return jsonify(store.get_system_perf())
-
-
-@app.route("/api/file_opens")
-def api_file_opens():
-    """Return the last 100 file-open events."""
-    return jsonify(store.get_file_opens(100))
-
-
-@app.route("/api/network")
-def api_network():
-    """Return the last 100 outbound TCP connection events."""
-    return jsonify(store.get_network(100))
-
-
-@app.route("/api/fork")
-def api_fork():
-    """Return the last 200 fork events."""
-    return jsonify(store.get_fork(200))
-
-
-@app.route("/api/execve")
-def api_execve():
-    """Return the last 200 execve events."""
-    return jsonify(store.get_execve(200))
-
-
-@app.route("/api/fork-exec")
-def api_fork_exec():
-    """Return the last 300 mixed fork+execve events."""
-    return jsonify(store.get_fork_exec(300))
-
-
-@app.route("/api/lifecycle")
-def api_lifecycle():
-    """Return live process lifecycle rows."""
-    return jsonify(store.get_lifecycle(300))
-
-
-@app.route("/api/overview")
-def api_overview():
-    """Return persisted system overview metadata for the current session."""
-    overview = store.get_overview()
-    if overview is None:
-        return jsonify({"error": "overview unavailable"}), 404
-    return jsonify(overview)
-
-
-@app.route("/api/dead-processes")
-def api_dead_processes():
-    """Return non-running lifecycle rows; supports limit/offset paging."""
-    raw_limit = request.args.get("limit", default=None, type=int)
-    raw_offset = request.args.get("offset", default=0, type=int)
-
-    # Default remains full archive to preserve existing UI behavior.
-    limit = raw_limit
-    if limit is not None:
-        limit = max(1, min(limit, 5000))
-
-    offset = max(0, raw_offset)
-
-    rows = store.get_dead_processes(limit=limit, offset=offset)
-    return jsonify(rows)
-
-@app.route("/api/eps")
-def api_eps():
-    return jsonify({"eps": store.get_eps()})
-
-@app.route("/api/uptime")
-def api_uptime():
-    """Return uptime since oldest living agent connection (*new way*)"""
-    return jsonify({"uptime": store.get_conn_uptime()})
 
 #%% Images
 
 @app.route("/favicon.ico")
 def favicon():
     """Return the favicon"""
-    return send_from_directory("static/images", "favicon-32x32.ico")
+    return send_from_directory("static/images/bergamot", "favicon-32x32.ico")
+
+#%% API
+
+@app.route("/api/uptime")
+def api_uptime():
+    """Return uptime since oldest living agent connection (*new way*)"""
+    return jsonify({"uptime": store.get_conn_uptime()})
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 def main():

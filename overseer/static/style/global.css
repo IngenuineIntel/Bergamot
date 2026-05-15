@@ -1,0 +1,80 @@
+/* global.css - everything's style*/
+
+/******************************************************************************
+                                    COLORS
+******************************************************************************/
+
+:root {
+  --bg:         #0d1117;
+  --surface:    #161b22;
+  --border:     #303e3a;
+  --accent:     #355230;
+  --text-bold:  #b9c9b9;
+  --text:       #a9c9a9;
+  --text-dim:   #8bab99;
+  --danger:     #f85149;
+  --success:    #3fb950;
+  --font-reg: 'Courier New', Courier, monospace;
+  --font-accent: monospace; /* TODO find a font that looks good on the title */
+}
+
+/******************************************************************************
+                                    BY TAG
+******************************************************************************/
+
+body {
+  text-align: center;
+  background: var(--bg);
+  font-family: var(--font-reg);
+  font-size: 13px;
+  color: var(--text);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+h1 {
+  font-family: var(--font-accent);
+  font-size: 18px;
+  font-weight: 200;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+}
+
+
+/******************************************************************************
+                                BY ID OR CLASS
+******************************************************************************/
+
+#menu-bar-interactives {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  color: var(--text);
+}
+
+#menu-bar-interactives strong {
+  color: var(--text-bold);
+}
+
+#menu-uptime {
+  text-align: center;
+}
+
+#gh_proj_link {
+  width: 32px;
+  height: 32px;
+}
