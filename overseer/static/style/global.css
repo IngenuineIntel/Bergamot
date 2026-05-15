@@ -1,21 +1,31 @@
-/* global.css - everything's style*/
+/* global.css - everything's style */
 
 /******************************************************************************
-                                    COLORS
+                                   SWITCHES
 ******************************************************************************/
 
 :root {
-  --bg:         #0d1117;
-  --surface:    #161b22;
-  --border:     #303e3a;
-  --accent:     #355230;
-  --text-bold:  #b9c9b9;
-  --text:       #a9c9a9;
-  --text-dim:   #8bab99;
-  --danger:     #f85149;
-  --success:    #3fb950;
-  --font-reg: 'Courier New', Courier, monospace;
-  --font-accent: monospace; /* TODO find a font that looks good on the title */
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #303e3a;
+  --danger: #f85149;
+  --success: #3fb950;
+
+  --header: #a9c9a9;
+  --header-font: "JetBrains Mono", monospace;
+
+  --special: #495942;
+  --special-font: "Space Mono", monospace;
+  --special-font-weight: bolder;
+  --special-font-style: normal;
+
+  --reg: #a9c9a8;
+  --reg-font: Courier, monospace;
+
+  --dim: #5b7166;
+  --dim-font: "JetBrains Mono", Courier, monospace;
+  --dim-font-weight: lighter
+
 }
 
 /******************************************************************************
@@ -25,9 +35,9 @@
 body {
   text-align: center;
   background: var(--bg);
-  font-family: var(--font-reg);
+  font-family: var(--reg-font);
   font-size: 13px;
-  color: var(--text);
+  color: var(--reg);
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -44,30 +54,34 @@ header {
   position: sticky;
   top: 0;
   z-index: 10;
+  max-height: 30px;
 }
-
-h1 {
-  font-family: var(--font-accent);
-  font-size: 18px;
-  font-weight: 200;
-  color: var(--accent);
-  letter-spacing: 0.1em;
-}
-
 
 /******************************************************************************
                                 BY ID OR CLASS
 ******************************************************************************/
 
-#menu-bar-interactives {
+#menu-bar>* {
   display: flex;
-  gap: 24px;
   align-items: center;
-  color: var(--text);
+  justify-content: space-between;
+  padding: 12px 24px;
+  position: sticky;
 }
 
-#menu-bar-interactives strong {
-  color: var(--text-bold);
+#menu-bar h1 {
+  color: var(--special);
+  font-family: var(--special-font);
+  font-style: var(--special-font-style);
+  font-weight: var(--special-font-weight);
+}
+
+#menu-bar sub {
+  color: var(--dim);
+  font-family: var(--dim-font);
+  font-weight: var(--dim-font-weight);
+  font-weight: 200;
+  margin-top: 20px;
 }
 
 #menu-uptime {

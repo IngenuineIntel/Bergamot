@@ -1,0 +1,32 @@
+/* Loading fonts */
+
+/***** JetBrains Mono *****/
+
+/* Regular */
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono/web/woff/JetBrainsMono-Regular.woff') format('woff');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Medium Italic */
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono/web/woff/JetBrainsMono-Medium-Italic.woff') format('woff');
+    font-weight: 500;
+    font-style: italic;
+    font-display: swap;
+
+}
+
+
+/***** Google Space Mono *****/
+
+@font-face {
+    font-family: 'Space Mono';
+    font-style: normal;
+    font-weight: 400;
+    src: local('Space Mono'), url('https://fonts.cdnfonts.com/s/15317/SpaceMono-Regular.woff') format('woff');
+}

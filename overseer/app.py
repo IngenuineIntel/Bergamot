@@ -92,6 +92,16 @@ def _patched_add_event(ev: dict):
 
 store.add_event = _patched_add_event  # type: ignore[method-assign]
 
+def envvar_fetch(name: str, valtype: type, default):
+    assert type(default) == valtype
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return valtype(raw)
+    except Exception:
+        return default
+
 
 # ── ROUTES ───────────────────────────────────────────────────────────────── #
 
@@ -100,13 +110,6 @@ store.add_event = _patched_add_event  # type: ignore[method-assign]
 @app.route("/")
 def index():
     return render_template("index.html")
-
-#%% Images
-
-@app.route("/favicon.ico")
-def favicon():
-    """Return the favicon"""
-    return send_from_directory("static/images/bergamot", "favicon-32x32.ico")
 
 #%% API
 
@@ -117,16 +120,6 @@ def api_uptime():
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 def main():
-    def envvar_fetch(name: str, valtype: type, default):
-        assert type(default) == valtype
-        raw = os.environ.get(name)
-        if raw is None:
-            return default
-        try:
-            return valtype(raw)
-        except Exception:
-            return default
-
     tcp_port = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
     http_host = "0.0.0.0"
     http_port = envvar_fetch("BERGAMOT_HTTP_PORT", int, 27960)
