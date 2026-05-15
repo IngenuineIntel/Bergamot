@@ -48,8 +48,6 @@ CREATE TABLE events (
     retval INTEGER -- syscall return (rax when we're back in usermode)
 );
 
-CREATE INDEX ts_min_max ON events(MAX(ts_s), MIN(ts_s));
-
 CREATE TABLE procs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     pid INTEGER NOT NULL,
