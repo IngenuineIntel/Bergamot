@@ -36,9 +36,6 @@ jobs:
     - name: Run Agent
       run: make ./bergamot-agent &
 
-    - name: Let Agent Cook
-      run: sleep 5
-
     - name: Stop Everything
       continue-on-error: true
       run: make universal_stop
