@@ -1,3 +1,8 @@
+// nav.js
+// manages the disappearing/reappearing nav bar
+
+"use strict";
+
 const navToggle = document.getElementById('navtoggle');
 const nav = document.getElementById('nav');
 

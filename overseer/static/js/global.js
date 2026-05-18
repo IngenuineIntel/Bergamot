@@ -1,6 +1,8 @@
 // global.js
 // holds general-use things that everyone needs in their lives
 
+"use strict";
+
 function fmtTimeAmount(seconds, clock_style = false) {
   /* Formats a number of seconds into a formatted string 
    *
@@ -31,3 +33,28 @@ function fmtEventTs(ts_s, ts_ms, ms_ct) {
     fractionalSecondDigits: ms_ct
   }) + " " + date.toLocaleDateString('en-US');
 }
+
+/* LIGHT/DARK mode */
+// usually this stuff is done in a more automatic way, but I want to be able
+// to change the mode from the console for debugging
+
+const html = document.querySelector("html");
+
+function darkMode() {
+  html.classList.remove("light-mode");
+}
+
+function lightMode() {
+  html.classList.add("light-mode");
+}
+
+const wantsDarkMode = window.matchMedia(
+  '(prefers-color-scheme: dark)'
+).matches;
+
+if (!wantsDarkMode) {
+  // wantsLightMode
+  lightMode();
+}
+
+/* Store this stuff so it survives DOM reload */
