@@ -6,7 +6,7 @@
 // time between fetching the API to see if an agent's connected to the backend
 // measured in seconds
 const UPTIME_CHECK_WAIT = 5;
-const MENU_UPTIME_ID    = "menu-uptime";
+const MENU_UPTIME_ID    = "uptime";
 
 async function renderUptime() {
   /* Renders  */
@@ -23,3 +23,6 @@ async function renderUptime() {
 const manageUptime = setTimeout(() => {
     document.getElementById(MENU_UPTIME_ID).innerText = renderUptime();
 }, UPTIME_CHECK_WAIT * 1000);
+
+/* TODO make this not show [object Promise] */
+/* TODO make number go up on its own without fetching /api/uptime */

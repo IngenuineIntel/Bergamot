@@ -3,28 +3,42 @@
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Connections - Bergamot</title>
-      <link rel="icon" href="/favicon.ico" />
+      <title>Home - Bergamot</title>
       {% include 'includes/_universal_imports.html' %}
-      <script src="/static/js/uptime.js"></script>
     </head>
     <body>
-      <header id="menu-bar">
-        <div class="menu-clump">
-          <h1>Bergamot</h1>
-          <sub>v0.1</sub>
+      <header>
+        <div id="logo-title">
+          <img alt="Bergamot Logo" src="{{ url_for('static', filename='images/bergamot/bergamot_full_logo-512x512.png') }}">
+          <h1>BERGAMOT</h1>
         </div>
-          <div class="menu-clump" id="menu-bar-interactives">
-          <span id="menu-uptime"></span> <!-- Managed in /static/scripts/uptime.js -->
-          <a class="menu-link" href="/captures">Captures</a>
-          <a class="menu-link" href="https://github.com/ingenuineintel/bergamot">
-            <img id="gh_proj_link" src="{{ url_for('static', filename='images/other/github/GitHub_Invertocat_White.png') }}">
-          </a>
-        </div>
+        <span id="uptime">No Connections</span>
+        <!-- script specifically for uptime measurement -->
+        <script src="/static/js/uptime.js"></script>
       </header>
-      <div id="frontpage-branding">
-        <img src="{{ url_for('static', filename='images/bergamot/bergamot_full_logo-512x512.png') }}">
-        <span>Copyright (c) 2026 IngenuineIntel</span>
+      <div id="nav" class="inactive">
+        <ul id="navlinks">
+          <li>
+            <a href="/">Home</a>
+          </li>
+          <li>
+            <a href="/captures">Captures</a>
+          </li>
+          <li>
+            <a href="/docs">Documentation</a>
+          </li>
+        </ul>
+        <a id="ghproj" href="https://github.com/ingenuineintel/bergamot" target="_blank" rel="noopener noreferrer">
+          <img src="{{ url_for('static', filename='images/other/github/GitHub_Invertocat_White.png') }}">
+        </a>
+        <sub id="ver">v0.1</sub>
       </div>
+      <button id="navtoggle">Me Button!</button>
+      <!-- script specifically for nav button logic -->
+      <script src="/static/js/nav.js"></script>
+      <div>
+        <h2>To get started:</h2>
+      </div>
+      <!-- TODO rest of body -->
     </body>
 </html>

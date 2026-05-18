@@ -32,63 +32,95 @@
                                     BY TAG
 ******************************************************************************/
 
-body {
-  text-align: center;
-  background: var(--bg);
-  font-family: var(--reg-font);
-  font-size: 13px;
-  color: var(--reg);
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
+body{
+  background-color: hsl(200, 10%, 70%);
+  margin: 0;
+  padding: 0;
 }
-
 
 header {
+  padding: 16px;
+  margin: 0px;
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 10;
-  max-height: 30px;
+  max-height: 64px;
+  border: 2px solid black;
 }
 
+main {
+  position: relative;
+}
 /******************************************************************************
                                 BY ID OR CLASS
 ******************************************************************************/
 
-#menu-bar>* {
+#logo-title {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  position: sticky;
 }
 
-#menu-bar h1 {
-  color: var(--special);
-  font-family: var(--special-font);
-  font-style: var(--special-font-style);
-  font-weight: var(--special-font-weight);
+#navtoggle {
+  padding: 10px 20px;
+  cursor: pointer;
 }
 
-#menu-bar sub {
-  color: var(--dim);
-  font-family: var(--dim-font);
-  font-weight: var(--dim-font-weight);
-  font-weight: 200;
-  margin-top: 20px;
+#nav.inactive {
+  position: absolute;
+  max-width: 0;
+  max-height: 0;
+  display: none;
 }
 
-#menu-uptime {
-  text-align: center;
+#nav.active {
+  display: block;
+  animation: fadeIn 0.5s;
+  position: absolute;
+  bottom: 0;
+  /* top: (#nav margin-top + header max-height + header padding */
+  top: 90px;
+  margin: 0px;
+  padding: 20px;
+  margin-top: 10px;
+  max-width: 20%;
+  border: 2px solid black;
+  pointer-events: none; /* So the button can be clicked through the nav */
 }
 
-#gh_proj_link {
-  width: 32px;
-  height: 32px;
+#nav.active>* {
+  pointer-events: auto; /* So that every that isn't the button is interactive as well */
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* TODO instead of fadeIn animation I want it to roll in from the left */
+
+#navlinks li {
+  padding-top: 2rem;
+}
+
+#navtoggle img {
+  max-width: 64px;
+  max-height: 64px;
+}
+
+#ghproj img{
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  max-width: 32px;
+  max-height: 32px;
+}
+
+#ver {
+  position:absolute;
+  bottom: 8px;
+  right: 8px;
 }
