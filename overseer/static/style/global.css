@@ -67,8 +67,7 @@ main {
 
 #nav.inactive {
   position: absolute;
-  max-width: 0;
-  max-height: 0;
+  border: 2px solid black;
   display: none;
 }
 
@@ -82,13 +81,57 @@ main {
   margin: 0px;
   padding: 20px;
   margin-top: 10px;
-  max-width: 20%;
   border: 2px solid black;
   pointer-events: none; /* So the button can be clicked through the nav */
+  text-align: left;
 }
 
 #nav.active>* {
   pointer-events: auto; /* So that every that isn't the button is interactive as well */
+  text-align: left;
+}
+
+/* nav bar link animation */
+
+.navlink {
+  width: fit-content;
+  padding-bottom: 2rem;
+  padding-left: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  border: 2px solid black;
+}
+
+.navlink a {
+  text-decoration: none;
+  position: relative;
+  padding-left: 1rem;
+  transition: all 0.3s ease-in-out;
+}
+
+.navlink a:hover {
+  position: relative;
+  transform: translateX(0.5rem);
+  transition: all 0.3s ease-in-out;
+}
+
+.navlink a::after {
+  content: "";
+  position: absolute;
+  width: 0.5rem;
+  height: 0.1rem;
+  top: 50%;
+  left: 0;
+  transition: all 0.4s ease-in-out;
+  background: black;
+}
+
+.navlink a:hover::after {
+  width: 2rem;
+  left: -1.5rem;
+  transition: all 0.4s ease-in-out;
+  background: black;
 }
 
 @keyframes fadeIn {
@@ -101,10 +144,6 @@ main {
 }
 
 /* TODO instead of fadeIn animation I want it to roll in from the left */
-
-#navlinks li {
-  padding-top: 2rem;
-}
 
 #navtoggle img {
   max-width: 64px;
