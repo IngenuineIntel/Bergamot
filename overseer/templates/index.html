@@ -39,5 +39,16 @@
       <!-- script specifically for nav button logic -->
       <script src="/static/js/nav.js"></script>
       <!-- TODO rest of body -->
+       <main>
+        <h2>Getting Started</h2>
+        <p>To gather data to analyze, first connect an Agent instance to this machine. The Overseer is currently
+expecting a connection at port <t id="port">JAVASCRIPT REQUIRED</t>. When an agent connects, it
+will automatically start populating the database and you can see how long it's connected at the top
+of the screen. Analysis can be done while the Agent is still transmitting data, but it is worth noting that this
+program is not yet capable of live analysis, and can only sniff retroactively.
+        </p>
+        <!-- script specifically to display the backend listening port-->
+        <script src="static/js/port.js"></script>
+       </main>
     </body>
 </html>

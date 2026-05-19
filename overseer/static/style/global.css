@@ -74,10 +74,23 @@ body {
   padding: 0;
 }
 
+main {
+  margin-left: 20%;
+  margin-right: 20%;
+}
+
 h1 {
   font-family: var(--sec-ff);
   padding-left: 1rem;
   padding-bottom: 1rem;
+}
+
+h2 {
+  font-family: var(--sec-ff);
+  padding-left: 1rem;
+  padding-bottom: 0.5rem;
+  text-align: left;
+  padding-left: 10%;
 }
 
 header {
@@ -103,6 +116,9 @@ main {
 }
 
 #navtoggle {
+  position: absolute;
+  top: 90px; /* header max-height + header padding */
+  left: 0;
   padding: 10px 20px;
   cursor: pointer;
 }
@@ -124,7 +140,7 @@ main {
   padding: 20px;
   margin-top: 10px;
   pointer-events: none; /* So the button can be clicked through the nav */
-  text-align: left;
+  z-index: 9;
 }
 
 #nav.active>* {

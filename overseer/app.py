@@ -36,7 +36,7 @@ import uuid
 
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 
-from server import start_tcp_server
+import server
 from state import store
 
 app = Flask(__name__)
@@ -113,6 +113,11 @@ def index():
 
 #%% API
 
+@app.route("/api/backend-port")
+def apt_backend_port():
+    """Return port that the backend server is listening on"""
+    return jsonify({"port": server.LISTEN_PORT})
+
 @app.route("/api/uptime")
 def api_uptime():
     """Return uptime since oldest living agent connection (*new way*)"""
@@ -147,7 +152,7 @@ def main():
     print(f"[over-seer] session db pending at {session_db_path}; waiting for agent handshake",
           flush=True)
 
-    start_tcp_server(port=tcp_port)
+    server.start_tcp_server(port=tcp_port)
     app.run(host=http_host, port=http_port, debug=False, threaded=True)
 
 if __name__ == "__main__":
