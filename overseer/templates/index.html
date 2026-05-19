@@ -1,70 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dashboard - Bergamot</title>
-  <link rel="stylesheet" href="/static/style.css" />
-</head>
-<body>
-  <header>
-    <h1>Bergamot</h1>
-    <div id="stats-bar">
-      <span id="stat-uptime"></span>
-      <a class="header-link" href="/history">Historical records</a>
-    </div>
-  </header>
-
-  <div class="overview" aria-live="polite">
-    <details class="iframe-dropdown iframe-dropdown-group" open>
-      <summary>System Overview</summary>
-      <iframe
-        class="graph-frame graph-frame-overview"
-        data-graph-frame
-        src="/graph/overview"
-        title="System Overview"
-        loading="lazy"
-      ></iframe>
-    </details>
-  </div>
-
-  <div class="lifecycle">
-    <details class="iframe-dropdown iframe-dropdown-group" open>
-      <summary>Process Lifecycle</summary>
-      <div class="iframe-dropdown-grid">
-        <iframe
-          class="graph-frame graph-frame-feed"
-          data-graph-frame
-          src="/graph/lifecycle"
-          title="Process Lifecycle"
-          loading="lazy"
-        ></iframe>
-
-        <iframe
-          class="graph-frame graph-frame-feed"
-          data-graph-frame
-          src="/graph/dead-processes"
-          title="Dead Processes"
-          loading="lazy"
-        ></iframe>
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Home - Bergamot</title>
+      {% include 'includes/_universal_imports.html' %}
+    </head>
+    <body>
+      <header>
+        <div id="logo-title">
+          <img alt="Bergamot Logo" src="{{ url_for('static', filename='images/bergamot/bergamot_full_logo-512x512.png') }}">
+          <h1>BERGAMOT</h1>
+        </div>
+        <span id="uptime">No Connections</span>
+        <!-- script specifically for uptime measurement -->
+        <script src="/static/js/uptime.js"></script>
+      </header>
+      <div id="nav" class="inactive">
+        <ul>
+          <li class="navlink">
+            <a href="/">Home</a>
+          </li>
+          <li class="navlink">
+            <a href="/captures">Captures</a>
+          </li>
+          <li class="navlink">
+            <a href="/docs">Documentation</a>
+          </li>
+        </ul>
+        <a id="ghproj" href="https://github.com/ingenuineintel/bergamot" target="_blank" rel="noopener noreferrer">
+          <img src="{{ url_for('static', filename='images/other/github/GitHub_Invertocat_White.png') }}">
+        </a>
+        <sub id="ver">v0.1</sub>
       </div>
-    </details>
-  </div>
-
-  <div class="syscalls">
-    <details class="iframe-dropdown iframe-dropdown-group" open>
-      <summary>All Events</summary>
-      <iframe
-        class="graph-frame graph-frame-feed"
-        data-graph-frame
-        src="/graph/syscalls"
-        title="All Events"
-        loading="lazy"
-      ></iframe>
-    </details>
-  </div>
-
-  <script src="/static/js/dashboard.js"></script>
-  <script src="/static/iframe_resize_parent.js"></script>
-</body>
+      <button id="navtoggle">
+        {% include 'includes/_menu-icon.svg.html' %}
+      </button>
+      <!-- script specifically for nav button logic -->
+      <script src="/static/js/nav.js"></script>
+      <!-- TODO rest of body -->
+    </body>
 </html>
