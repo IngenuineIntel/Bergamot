@@ -41,45 +41,12 @@ from state import store
 
 app = Flask(__name__)
 
-# ── SSE subscriber registry ───────────────────────────────────────────────────
-#
-# Each browser connection gets its own Queue.  When a new event arrives
-# (injected by server.py via announce_event()), it is pushed into every
-# registered queue so all connected clients receive it.
+# TODO redesign (in an effective way) a way to seamlessly push events to multiple clients
+# I'm thinking we have an /api/event_count and /api/events?count=whatever sort of system
+# where the JS POSTs count=`event_count` - `however many events the webpage already has`
+# and just put it on a refresh of 2 seconds or whatever
 
-_subscribers: list[queue.Queue] = []
-_subscribers_lock = threading.Lock()
-
-
-def subscribe() -> queue.Queue:
-    q: queue.Queue = queue.Queue(maxsize=512)
-    with _subscribers_lock:
-        _subscribers.append(q)
-    return q
-
-
-def unsubscribe(q: queue.Queue):
-    with _subscribers_lock:
-        try:
-            _subscribers.remove(q)
-        except ValueError:
-            pass
-
-
-def announce_event(ev: dict):
-    """Called by server.py after inserting an event into EventStore."""
-    msg = json.dumps(ev)
-    with _subscribers_lock:
-        dead = []
-        for q in _subscribers:
-            try:
-                q.put_nowait(msg)
-            except queue.Full:
-                dead.append(q)   # slow client — drop it
-        for q in dead:
-            _subscribers.remove(q)
-
-
+# TODO this is a horrendous way to do this
 # Patch store so server.py can call announce_event transparently.
 # server.py calls store.add_event(); we wrap it here after import.
 _original_add_event = store.add_event
@@ -120,10 +87,12 @@ def apt_backend_port():
 
 @app.route("/api/uptime")
 def api_uptime():
-    """Return uptime since oldest living agent connection (*new way*)"""
+    """Return uptime since oldest living agent connection"""
     return jsonify({"uptime": store.get_conn_uptime()})
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+""" TODO THE REST OF THE SERVER """
+
+# ── Entry point ──────────────────────────────────────────────────────────── #
 def main():
     tcp_port = envvar_fetch("BERGAMOT_WIRE_PORT", int, 12046)
     http_host = "0.0.0.0"
@@ -134,6 +103,9 @@ def main():
     sql_dir = os.path.join(app_dir, "sql")
 
     os.makedirs(db_base_dir, exist_ok=True)
+
+    # TODO make databases be opened for _every time the Agent connects_, not
+    # every time the Overseer starts
 
     session_uuid = uuid.uuid4().hex
     session_salt = secrets.token_hex(4)
