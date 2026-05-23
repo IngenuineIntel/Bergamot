@@ -1,4 +1,4 @@
--- initalview_cpu.sql
+-- processing_cpu.sql
 -- gets information required for "CPU%" amd "RAM%"
 
 SELECT

@@ -4,15 +4,14 @@ PRAGMA jorunal_mode=WAL;
 PRAGMA busy_timeout=5000;
 
 CREATE TABLE metadata (
-    db_name TEXT,
-    db_time TEXT,
-    overseer_ver TEXT
+    db_time TEXT, -- time of initialization
+    overseer_ver TEXT -- overseer version that created it
 );
 
 INSERT INTO metadata (
-    db_name, db_time, overseer_ver
+    db_time, overseer_ver
 ) VALUES (
-    :db_name, :db_time, :overseer_ver
+    :db_time, :overseer_ver
 );
 
 CREATE TABLE overviewdata (

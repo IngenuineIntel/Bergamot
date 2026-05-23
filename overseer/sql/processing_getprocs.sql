@@ -1,4 +1,4 @@
--- intialview_getprocs.sql
+-- processing_getprocs.sql
 -- gets information required for "Process Overview"
 
 SELECT
