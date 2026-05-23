@@ -75,11 +75,12 @@ class DataProcessor:
                 listing_obj = __ProcessorDatabaseListing()
                 listing_obj.db_name = listing
 
-                c = sqlite3.connect(listing).cursor()
+                co = sqlite3.connect(listing)
+                c = co.cursor()
 
                 listing_obj.db_time, listing_obj.overseer_ver = c.execute(__library.getmeta).fetchone()
                 
-                c.close()
+                co.close()
                 ret.append(listing_obj)
             return ret
 
