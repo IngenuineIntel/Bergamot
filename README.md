@@ -100,7 +100,11 @@ UI's not very good), nevermind consice information about it.
 
 Contribution, and interest in contribution, is greatly welcomed. More specific
 guidelines on contribution, as well as general how-to's for familiarizing
-yourself with the codebase and how it works, ~~can be found in `CONTRIBUTING.md`.~~
+yourself with the codebase and how it works, can be found in `CONTRIBUTING.md`.
+
+## Code of Conduct
+
+is [here](CODE_OF_CONDUCT.md)
 
 ## Licensing
 
