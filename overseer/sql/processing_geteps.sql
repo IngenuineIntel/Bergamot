@@ -1,4 +1,4 @@
--- initialview_geteps.sql
+-- processing_geteps.sql
 -- gets information required for "Events/Second"
 
 SELECT

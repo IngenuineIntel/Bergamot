@@ -3,26 +3,38 @@
 
 "use strict";
 
-// time between fetching the API to see if an agent's connected to the backend
-// measured in seconds
-const UPTIME_CHECK_WAIT = 5;
-const MENU_UPTIME_ID    = "uptime";
+const portTag = document.getElementById("uptime");
 
-async function renderUptime() {
-  /* Renders  */
-  const req = await fetch("/api/uptime");
-  const j = await req.json();
-  const uptime = Number(j.uptime ?? 0);
-  if (uptime > 0) {
-    return `LIVE for ${fmtTimeAmount(uptime)}`;
+let uptimeKeepup = 0;
+let epochFetchMod = 5;
+let epochFetchStat = 0;
+
+function ProcessAndRenderUptime(uptime) {
+  if (!uptime) {
+    portTag.innerText = "No Connections";
   } else {
-    return "No Connections";
+    portTag.innerText = `LIVE for ${fmtTimeAmount(uptime)}`
+  }
+}
+
+async function uptimeEpoch() {
+    if(uptimeKeepup >= epochFetchMod) {
+    fetch("/api/uptime").then(
+      res => res.json()
+    ).then(data => {
+      ProcessAndRenderUptime(data.uptime);
+    }).catch(
+      err => console.error("Error:", error)
+    );
+  } else {
+    uptimeKeepup++;
+    epochFetchStat++;
+    ProcessAndRenderUptime();
   }
 }
 
 const manageUptime = setTimeout(() => {
-    document.getElementById(MENU_UPTIME_ID).innerText = renderUptime();
-}, UPTIME_CHECK_WAIT * 1000);
+  uptimeEpoch();
+}, 1000);
 
-/* TODO make this not show [object Promise] */
-/* TODO make number go up on its own without fetching /api/uptime */
+/* TODO make this work, it's broke atm */

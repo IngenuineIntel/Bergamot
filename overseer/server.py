@@ -378,6 +378,8 @@ def _tcp_server_loop(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
             break # socket was closed (shutdown?)
 
 def start_tcp_server(host: str = LISTEN_HOST, port: int = LISTEN_PORT):
+    global LISTEN_PORT
+    LISTEN_PORT = port # for /api/backend-port
     t = threading.Thread(target=store.conn_uptime_thread, args=(),
                          daemon=True, name="bergamot-uptime-manager")
     u = threading.Thread(target=_tcp_server_loop, args=(host, port), daemon=True,
