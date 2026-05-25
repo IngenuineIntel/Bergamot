@@ -4,6 +4,9 @@
 - [Overview](#overview)
 - [Implementation Procedure](#implementation-procedure)
 - [Navigating The Code](#navigating-the-code)
+    - [The Engine](#the-engine)
+    - [The Agent](#the-agent)
+    - [The Overseer](#the-overseer)
 - [Code Formatting](#code-formatting)
     - [Universal](#universal)
     - [Python/Cython](#pythoncython)
@@ -26,7 +29,69 @@ this. Blah Blah Blah **TODO**.
 
 ## Navigating The Code
 
-This will take a long time **TODO**.
+Here's a rundown of every program, its functionality, and its source files, in
+order of data flow
+
+### The Engine
+
+The Engine is a Linux kernel module, nothing more. It registers KProbe hooks
+into various syscalls, and syscall return values. It also registers a procfile,
+`/proc/begamot-pipe`, through whom it exfiltrates data. The Engine keeps a ring
+buffer in kernel memory of the events it captures, and upon the procfile being
+read, the information is dumped and the buffer cleared.
+
+Only one program can read from the file, and it's whichever program tries. In
+order for another program to read the file after another program's read it, the
+module has to be reloaded. Perhaps in the future this will be a little more
+graceful, but this has all the security necessary for the program to function
+correctly.
+
+Note that:
+
+- If the reading program doesn't get information from the file often
+enough, the ring buffer will overflow and data will be lost silently.
+- If another program tries to read the file, it gets a permission error, but
+the file is still visible.
+- If the lease for the procfile is open, but if EUID != 0, the lease will not
+be given and a permission error will be shown
+
+#### Files
+
+- `engine.c`: procfile logic, syscall hooks, entry point
+- `hooks.c`: internal hook logic
+- `engine.h`: data types used by both `engine.c` and `hooks.c`
+- `switches.h`: compile-time options in the form of macros
+
+### The Agent
+
+The Agent is written in Cython. It claims the procfile and reads its contents
+at a set frequency. It simultaneously gathers CPU and RAM performance and
+diagnostic information, as well as getting information about every process. It
+takes all of this information and compresses it into a custom binary protocol
+and sends it to a specified network location.
+
+Note that:
+
+- The program is designed to be run from the command line, but can be
+configured from environment variables, too.
+- The program will exit gracefully if not run as root.
+- If the program fails to read the procfile, it will assume the module is
+installed in the kernel and try to reload it itself.
+- The program gives logs in stdout
+
+#### Files
+
+- `agent.pyx`: entry point, most logic
+- `interface.pyx`: logging and command line interfacing
+- `procurement.pyx`: grabs performance and process information
+- `protocol.pyx`: binary protocol logic
+- `net.pyx`: networking
+- `workers.pyx`: multithreading entry points
+- `setup.py`: Cython entry point
+
+### The Overseer
+
+##### TODO
 
 ## Code Formatting
 
