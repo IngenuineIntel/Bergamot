@@ -2,24 +2,16 @@
 -- timestamp
 
 SELECT
-    COUNT(*) AS processes_seen,
-    (
+    COUNT(*) AS processes_seen
+  , (
         SELECT
             COUNT(*)
         FROM procs
         WHERE first_seen_ts_s > :min_ts
-          AND first_seen_ts_s <= :max_ts
-    ) AS spawns_seen,
-    (
-        COUNT(*) - (
-            SELECT COUNT(*)
-            FROM procs
-            -- the trick here is > instead of >=
-            WHERE first_seen_ts_s > :min_ts
-              AND first_seen_ts_s <= :max_ts
-        )
-    ) AS preexisting,
-    (
+            AND first_seen_ts_s <= :max_ts
+    ) AS spawns_seen
+  , processes_seen - spawn_seen AS preexisting
+  , (
         SELECT
             COUNT(*)
         FROM procs
@@ -27,6 +19,5 @@ SELECT
             AND last_seen_ts_s <= :max_ts
     ) AS deaths_seen
 FROM procs
-WHERE
-    first_seen_ts_s >= :min_ts AND
-    first_seen_ts_s <= :max_ts;
+WHERE first_seen_ts_s >= :min_ts
+    AND first_seen_ts_s <= :max_ts;

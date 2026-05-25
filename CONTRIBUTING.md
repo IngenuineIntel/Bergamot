@@ -82,7 +82,7 @@ definitions, snake_case for everything else, etc.)
 - use header files
 - compilation warnings are unacceptable in most cases
 - aim for compatibility (duh), even if you fail
-- separare sections like the following, making sure the separator comment is 80
+- separate sections like the following, making sure the separator comment is 80
 characters long, and is preceeded by 2 newlines:
 ```C
 prev_section_code();
@@ -134,8 +134,65 @@ comment preceeded by at least 1 newline:
 
 ### SQL
 
-- more lines is better than large width
-- 4 space indents _(prone to change)_
+- 4 space indents
+- more lines, not less
+- commas become part of the indentation instead of going after a field
+- don't use deprecated stuff
+<!--
 - keywords are always CAPS, and nothing else is
-- avoid deprecated or non-universal funcitonalities
-- obey standard SQL styling and naming conventions
+- user defined values are always snake_case or occasionally scriptiocontinua
+for really superfluous stuff
+- anywhere where there can be multiple expressions in a series (after `SELECT`,
+`WHERE`, etc.) every expression gets its own line
+- however, where there can only be one item (`FROM`, `LIMIT`, etc.) it shares
+the line with the preceeding keyword, and this applies to `WHERE` as well if
+there is only one conditional expression after the `WHERE`
+- operators between expressions go on the next line with the latter expression
+unless preceeding a subquery
+- commas go before fields and become part of the indent
+- `* JOIN` field concatenations all get their own lines
+-->
+
+Instead of writing bullet points for every single typing convention I happen to
+follow, here's code examples to follow the vibe of. Whatever looks best _is_
+best.
+
+##### A Simple Example:
+
+```sql
+SELECT
+    id
+  , name
+  , CAST(number AS FLOAT)
+  , CASE
+        WHERE has_door_lock = "no" THEN TRUE
+        ELSE FALSE
+    END AS exposed
+  , street_address
+  , nr_cricket_bats_under_bed
+FROM people
+WHERE exposed IS TRUE;
+
+```
+
+##### A Really Not Simple Example:
+
+```sql
+SELECT
+    COUNT(*)
+  , COUNT(col_not_not_null) - (
+        SELECT
+            COUNT(col_not_not_null)
+        FROM big_table
+        WHERE
+            yet_another_val >= you_never_expect_the_third_value
+            AND even_this_val IS this_one
+            AND i_think_thats_wild IS NOT NULL
+    ) AS a_maths_happened
+FROM tbl1
+WHERE col0 >= col1
+    OR col2 <= col3
+INNER JOIN tbl2 ON
+    tbl1.id = tbl2.id
+ORDER BY id DESC;
+```
