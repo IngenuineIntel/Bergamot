@@ -72,6 +72,8 @@ def envvar_fetch(name: str, valtype: type, default):
 
 # ── ROUTES ───────────────────────────────────────────────────────────────── #
 
+# TODO a multi-line comment notating all the routes
+
 #%% HTML
 
 @app.route("/")

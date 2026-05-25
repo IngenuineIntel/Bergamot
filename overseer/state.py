@@ -24,6 +24,9 @@ import time
 import json
 from collections import deque
 
+from querying import DataManager
+from sqlfetcher import SQLManager
+
 
 def _normalize_system_info(system_info: dict | None) -> dict[str, str | int]:
     info = system_info or {}
@@ -39,11 +42,13 @@ def _normalize_system_info(system_info: dict | None) -> dict[str, str | int]:
     }
 
 
-class EventStore:
+class LiveDataManager(DataManager):
     def __init__(self, max_file_opens: int = 1000, max_network: int = 500,
                  rate_window: int = 10):
+        super().__init__()
         # race condition? nah
         self._lock = threading.Lock()
+        self._sql_manager = SQLManager()
 
         # live process table
         self.processes: dict[int, dict] = {}
@@ -55,7 +60,7 @@ class EventStore:
         self.execve_events: deque = deque(maxlen=1000)
         self.fork_exec_events: deque = deque(maxlen=1500)
 
-        # all recent events (combined) for the /api/events endpoint
+        # all recent events (combined)
         self.recent_events: deque = deque(maxlen=2000)
 
         # stats
@@ -66,7 +71,6 @@ class EventStore:
         self._rate_window: int       = rate_window
 
         # SQLite persistence (configured at app startup)
-        self._db_conn: sqlite3.Connection | None = None
         self._db_path: str | None = None
         self._db_insert_event_sql: str | None = None
         self._db_insert_proc_sql: str | None = None
@@ -121,15 +125,10 @@ class EventStore:
                 self._close_locked()
 
             self._db_path = db_path
-            conn = sqlite3.connect(db_path, timeout=5.0, check_same_thread=False)
+            self._sql_manager = SQLManager(sql_dir)
+            conn = self.connect_database(db_path, timeout=5.0, check_same_thread=False)
 
-            newdb_path = os.path.join(sql_dir, "initdb.sql")
-            evententry_path = os.path.join(sql_dir, "entryevent.sql")
-            procentry_path = os.path.join(sql_dir, "entryproc.sql")
-            systemperfentry_path = os.path.join(sql_dir, "entryperf.sql")
-
-            with open(newdb_path, "r", encoding="utf-8") as f:
-                newdb_sql = f.read()
+            newdb_sql = self._sql_manager.get("initdb")
 
             normalized_info = _normalize_system_info(system_info)
             self._run_sql_statements_with_named_params(conn, newdb_sql, {
@@ -139,14 +138,15 @@ class EventStore:
                 **normalized_info,
             })
 
-            with open(evententry_path, "r", encoding="utf-8") as f:
-                self._db_insert_event_sql = f.read().strip()
+            self._db_insert_event_sql = self._sql_manager.get("entryevent")
 
-            with open(systemperfentry_path, "r", encoding="utf-8") as f:
-                self._db_insert_system_perf_sql = f.read().strip()
+            self._db_insert_system_perf_sql = self._sql_manager.get("entryperf")
 
-            with open(procentry_path, "r", encoding="utf-8") as f:
-                proc_sql_chunks = [chunk.strip() for chunk in f.read().split(";") if chunk.strip()]
+            proc_sql_chunks = [
+                chunk.strip()
+                for chunk in self._sql_manager.get("entryproc").split(";")
+                if chunk.strip()
+            ]
 
             if len(proc_sql_chunks) != 3:
                 raise ValueError("procentry.sql must contain exactly 3 SQL statements")
@@ -157,7 +157,6 @@ class EventStore:
 
             conn.commit()
 
-            self._db_conn = conn
             self._pending_writes = 0
             self._last_commit_mono = time.monotonic()
             self._active_proc_row_ids.clear()
@@ -196,8 +195,7 @@ class EventStore:
             return
 
         self._flush_commits_locked(force=True)
-        self._db_conn.close()
-        self._db_conn = None
+        self.close_database()
         self._db_insert_event_sql = None
         self._db_insert_proc_sql = None
         self._db_insert_system_perf_sql = None
@@ -699,26 +697,66 @@ class EventStore:
             return sorted(self.processes.values(), key=lambda p: p["pid"])
 
     def get_file_opens(self, limit: int = 100) -> list[dict]:
+        if self._db_conn is not None:
+            return self.get_persisted_events(limit=limit, ev_type="open")
         with self._lock:
             items = list(self.file_opens)
         return items[-limit:]
 
     def get_network(self, limit: int = 100) -> list[dict]:
+        if self._db_conn is not None:
+            return self.get_persisted_events(limit=limit, ev_type="connect")
         with self._lock:
             items = list(self.network)
         return items[-limit:]
 
     def get_fork(self, limit: int = 200) -> list[dict]:
+        if self._db_conn is not None:
+            return self.get_persisted_events(limit=limit, ev_type="fork")
         with self._lock:
             items = list(self.fork_events)
         return items[-limit:]
 
     def get_execve(self, limit: int = 200) -> list[dict]:
+        if self._db_conn is not None:
+            return self.get_persisted_events(limit=limit, ev_type="execve")
         with self._lock:
             items = list(self.execve_events)
         return items[-limit:]
 
     def get_fork_exec(self, limit: int = 300) -> list[dict]:
+        if self._db_conn is not None:
+            with self._lock:
+                self._flush_commits_locked(force=True)
+                rows = self._db_conn.execute(
+                    """
+                    SELECT id, ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg1, arg2, retval
+                    FROM events
+                    WHERE type IN ('fork', 'execve')
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+
+            out = []
+            for row in rows:
+                out.append({
+                    "id": row[0],
+                    "ts_s": row[1],
+                    "ts_ms": row[2],
+                    "pid": row[3],
+                    "ppid": row[4],
+                    "uid": row[5],
+                    "type": row[6],
+                    "subtype": row[7],
+                    "comm": row[8],
+                    "arg1": row[9] or "",
+                    "arg2": row[10] or "",
+                    "retval": row[11] or 0,
+                    "arg": row[9] or "",
+                })
+            return out
         with self._lock:
             items = list(self.fork_exec_events)
         return items[-limit:]
@@ -759,6 +797,8 @@ class EventStore:
         return ordered[offset:offset + limit]
 
     def get_recent_events(self, limit: int = 200) -> list[dict]:
+        if self._db_conn is not None:
+            return self.get_persisted_events(limit=limit)
         with self._lock:
             items = list(self.recent_events)
         return items[-limit:]
@@ -903,17 +943,7 @@ class EventStore:
         if row is None:
             return None
 
-        keys = (
-            "hostname",
-            "kernelver",
-            "distro",
-            "ipaddr",
-            "macaddr",
-            "processor",
-            "processor_vend",
-            "ram_gbs",
-        )
-        data = dict(zip(keys, row))
+        data = self.row_to_dict(row)
         return {
             key: value
             for key, value in data.items()
@@ -947,4 +977,4 @@ class EventStore:
             return self.conn_uptime
 
 # Singleton shared across the whole process
-store = EventStore()
+store = LiveDataManager()

@@ -9,7 +9,6 @@ SELECT
         * 100
         AS ram_x 
 FROM system_perf
-WHERE
-    y >= :min_ts AND
-    y <= :max_ts
+WHERE ts_s >= :min_ts
+    AND ts_s <= :max_ts
 GROUP BY y;

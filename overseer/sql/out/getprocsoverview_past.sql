@@ -1,4 +1,3 @@
--- processing_getprocs.sql
 -- gets information required for "Process Overview"
 
 SELECT
@@ -7,16 +6,23 @@ SELECT
         SELECT
             COUNT(*)
         FROM procs
-        WHERE fist_seen_ts_s > :min_ts
+        WHERE first_seen_ts_s > :min_ts
+          AND first_seen_ts_s <= :max_ts
     ) AS spawns_seen,
     (
-        processes_seen - spawns_seen
+        COUNT(*) - (
+            SELECT COUNT(*)
+            FROM procs
+            WHERE first_seen_ts_s > :min_ts
+              AND first_seen_ts_s <= :max_ts
+        )
     ) AS preexisting,
     (
         SELECT
             COUNT(*)
         FROM procs
-        WHERE last_seen_ts_s <= :max_ts
+        WHERE last_seen_ts_s >= :min_ts
+          AND last_seen_ts_s <= :max_ts
     ) AS deaths_seen
 FROM procs
 WHERE
