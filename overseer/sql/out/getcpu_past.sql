@@ -12,4 +12,5 @@ FROM perf
 WHERE
     ts_s >= :min_ts
     AND ts_s <= :max_ts
-GROUP BY y;
+GROUP BY y
+ORDER BY y ASC;
