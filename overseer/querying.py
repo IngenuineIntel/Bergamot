@@ -42,7 +42,7 @@ class DataManager:
         return self._db_conn
 
     @db.setter
-    def db(self, database_path: str, **connect_kwargs: Any):
+    def db(self, database_path: str):
         with self._db_lock:
             self._close_database()
             if database_path == None:
