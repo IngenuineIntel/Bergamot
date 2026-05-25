@@ -46,11 +46,41 @@ app = Flask(__name__)
 # where the JS POSTs count=`event_count` - `however many events the webpage already has`
 # and just put it on a refresh of 2 seconds or whatever
 
-# TODO this is a horrendous way to do this
-# Patch store so server.py can call announce_event transparently.
-# server.py calls store.add_event(); we wrap it here after import.
-_original_add_event = store.add_event
 
+# FIXME PLEASE!!
+# START HORRENDOUS CODE
+_subscribers: list[queue.Queue] = []
+_subscribers_lock = threading.Lock()
+
+def subscribe() -> queue.Queue:
+    q: queue.Queue = queue.Queue(maxsize=512)
+    with _subscribers_lock:
+        _subscribers.append(q)
+    return q
+
+
+def unsubscribe(q: queue.Queue):
+    with _subscribers_lock:
+        try:
+            _subscribers.remove(q)
+        except ValueError:
+            pass
+
+
+def announce_event(ev: dict):
+    """Called by server.py after inserting an event into EventStore."""
+    msg = json.dumps(ev)
+    with _subscribers_lock:
+        dead = []
+        for q in _subscribers:
+            try:
+                q.put_nowait(msg)
+            except queue.Full:
+                dead.append(q)   # slow client — drop it
+        for q in dead:
+            _subscribers.remove(q)
+
+_original_add_event = store.add_event
 
 def _patched_add_event(ev: dict):
     _original_add_event(ev)
@@ -58,6 +88,8 @@ def _patched_add_event(ev: dict):
 
 
 store.add_event = _patched_add_event  # type: ignore[method-assign]
+
+# END HORRENDOUS CODE
 
 def envvar_fetch(name: str, valtype: type, default):
     assert type(default) == valtype
