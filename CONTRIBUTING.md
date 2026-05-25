@@ -61,7 +61,7 @@ from foo import bar
 ### Python/Cython
 
 - 4 space indents
-- assume Python >= 3.10 is being used, and obey all deprecations (allowing
+- assume Python >= 3.11 is being used, and obey all deprecations (allowing
 `match`/`case`, not allowing `distutils`, etc.)
 - separate sections like the following, making sure the separator comment is 80
 characters long, and is preceeded by 2 newlines:
