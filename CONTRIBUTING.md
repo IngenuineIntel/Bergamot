@@ -135,6 +135,7 @@ comment preceeded by at least 1 newline:
 ### SQL
 
 - more lines is better than large width
+- 4 space indents _(prone to change)_
 - keywords are always CAPS, and nothing else is
 - avoid deprecated or non-universal funcitonalities
 - obey standard SQL styling and naming conventions
