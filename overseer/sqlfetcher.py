@@ -55,6 +55,9 @@ class SQLManager:
 
         return ret
 
+    def __setattr__(self, name, value):
+        raise SQLManagementError(f"'{type(self)} is read-only.")
+
     @classmethod
     def dbg_index(cls):
         for i in cls.__ALIASES:
@@ -62,3 +65,5 @@ class SQLManager:
 
     def __dict__(self):
         return self.__internal_aliases
+
+sql = SQLManager()
