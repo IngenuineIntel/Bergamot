@@ -3,6 +3,7 @@
 
 import contextlib
 import os
+from threading import RLock
 
 class SQLManagementError(Exception):
     """
@@ -19,18 +20,20 @@ class SQLManager:
         "entryperf": "in/entryperf.sql",
 
         # data outputs
-        "processing_getmeta": "out/getmeta_past.sql",
-        "processing_getcpu": "out/getcpu_past.sql",
-        "processing_geteps": "out/geteps_past.sql",
-        "processing_getprocs": "out/getprocs_past.sql",
-        "processing_getmaxmints": "out/getminmaxts_past.sql",
-        "processing_getminmaxts": "out/getminmaxts_past.sql",
+        "getmeta": "out/getmeta_past.sql",
+        "getcpu": "out/getcpu_past.sql",
+        "geteps": "out/geteps_past.sql",
+        "getprocs": "out/getprocs_past.sql",
+        "getminmaxts": "out/getminmaxts_past.sql",
+        "getoverview": "out/getoverview_past.sql"
     }
 
     def __init__(self, sqldir="sql"):
 
         self.__internal_aliases = dict(self.__ALIASES)
         
+        self.__getattr_rlock = RLock()
+
         path = ""
         for key in self.__internal_aliases:
             try:
@@ -42,7 +45,7 @@ class SQLManager:
             except FileNotFoundError:
                 raise SQLManagementError(f"Couldn't access file {path}")
 
-    def __getattr__(self, key):
+    def __sub_getattr__(self, key):
         if key == "__all__":
             return list((*self.__internal_aliases.keys(), "dbg_index"))
 
@@ -54,6 +57,10 @@ class SQLManager:
             raise AttributeError(f"'{type(self)}' as no attribute '{key}'. Try running `SQLManager.dbg_index()` to get a list of SQL aliases.")
 
         return ret
+
+    def __getattr__(self, key):
+        with self.__getattr_rlock():
+            return __sub_getattr__(key)
 
     def __setattr__(self, name, value):
         raise SQLManagementError(f"'{type(self)} is read-only.")
