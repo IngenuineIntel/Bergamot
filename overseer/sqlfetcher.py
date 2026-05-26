@@ -1,18 +1,17 @@
 """Shared SQL script loader for Over-Seer managers."""
 # TODO I NEED COMMENTS
 
-from pathlib import Path
+import contextlib
+import os
 
 class SQLManagementError(Exception):
     """
-    If you've seen this exception before, there's either something wrong with
-    your codebase, this program's packaging, or the SQLManager class itself.
+    If you've just seen this exception, it's either your fault, or the fault
+    of this programs packaging.
     """
 
 class SQLManager:
-    """Load and cache SQL scripts by logical name from the overseer sql tree."""
-
-    _ALIASES = { # omit ".sql"
+    __ALIASES = {
         # data inputs
         "initdb": "in/initdb.sql",
         "entryevent": "in/entryevent.sql",
@@ -26,61 +25,40 @@ class SQLManager:
         "processing_getprocs": "out/getprocs_past.sql",
         "processing_getmaxmints": "out/getminmaxts_past.sql",
         "processing_getminmaxts": "out/getminmaxts_past.sql",
-
-        # direct file references for both
-        # TODO why?
-        "in/initdb.sql": "in/initdb.sql",
-        "in/entryevent.sql": "in/entryevent.sql",
-        "in/entryproc.sql": "in/entryproc.sql",
-        "in/entryperf.sql": "in/entryperf.sql",
-        "out/getmeta_past.sql": "out/getmeta_past.sql",
-        "out/getcpu_past.sql": "out/getcpu_past.sql",
-        "out/geteps_past.sql": "out/geteps_past.sql",
-        "out/getprocs_past.sql": "out/getprocs_past.sql",
-        "out/getminmaxts_past.sql": "out/getminmaxts_past.sql",
     }
 
-    def __init__(self, sql_dir: str | Path | None = None):
-        base_dir = Path(__file__).resolve().parent
-        self._sql_dir = Path(sql_dir) if sql_dir is not None else (base_dir / "sql")
-        self._cache: dict[str, str] = {}
+    def __init__(self, sqldir="sql"):
 
-    @property
-    def sql_dir(self) -> Path:
-        return self._sql_dir
+        self.__internal_aliases = dict(self.__ALIASES)
+        
+        path = ""
+        for key in self.__internal_aliases:
+            try:
+                path = os.path.join(os.path.realpath(sqldir), self.__internal_aliases[key])
 
-    def get(self, script_name: str) -> str:
-        normalized = self._normalize_name(script_name)
-        if normalized in self._cache:
-            return self._cache[normalized]
+                with open(path, "r") as fd:
+                    self.__internal_aliases[key] = fd.read().strip()
 
-        # TODO consider if this is very Pythonic... it might be more Pythonic
-        # to just open the file and wait for it to throw a FileNotFoundError
-        # on its own.
+            except FileNotFoundError:
+                raise SQLManagementError(f"Couldn't access file {path}")
 
-        script_path = self._sql_dir / normalized
-        if not script_path.exists():
-            raise SQLManagementError(f"SQL script not found: {script_path}")
+    def __getattr__(self, key):
+        if key == "__all__":
+            return list((*self.__internal_aliases.keys(), "dbg_index"))
 
-        content = script_path.read_text(encoding="utf-8").strip()
-        self._cache[normalized] = content
-        return content
+        ret = None
+        with contextlib.suppress(KeyError):
+            ret = self.__internal_aliases[key]
 
-    def _normalize_name(self, script_name: str) -> str:
-        name = (script_name or "").strip()
-        if not name:
-            raise SQLManagementError("script_name must be a non-empty string")
+        if not ret:
+            raise AttributeError(f"'{type(self)}' as no attribute '{key}'. Try running `SQLManager.dbg_index()` to get a list of SQL aliases.")
 
-        if name in self._ALIASES:
-            return self._ALIASES[name]
+        return ret
 
-        # TODO think about this critically
-        candidate = f"{name}.sql" if not name.endswith(".sql") else name
-        if candidate in self._ALIASES:
-            return self._ALIASES[candidate]
+    @classmethod
+    def dbg_index(cls):
+        for i in cls.__ALIASES:
+            print(f"{i}\t\t{cls.__ALIASES[i]}")
 
-        # If the caller already supplied a path-like name, allow it directly.
-        if "/" in name or name.endswith(".sql"):
-            return name
-
-        raise SQLManagementError(f"Unknown SQL script alias: {script_name}")
+    def __dict__(self):
+        return self.__internal_aliases
