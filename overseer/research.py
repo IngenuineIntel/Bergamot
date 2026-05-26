@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from querying import DataManager, DataManagementError
-from sqlfetcher import SQLManager
+from sqlfetcher import sql
 
 @dataclass(slots=True)
 class DatabaseListing:
@@ -23,6 +23,7 @@ class DatabaseListing:
         }
 
 # TODO I NEED COMMENTS
+# TODO I think I have to rewrite it...
 
 class PastDataManager(DataManager):
     """Reader for past session databases selected by the developer."""
@@ -32,6 +33,8 @@ class PastDataManager(DataManager):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self._base_dir = base_dir
         self._db_dir = os.path.join(base_dir, db_dir)
+        
+        # TODO do away with entirely
         self._sql_manager = SQLManager(os.path.join(base_dir, sql_dir))
 
         self._choice: str | None = None
@@ -118,7 +121,6 @@ class PastDataManager(DataManager):
         if not os.path.isdir(self._db_dir):
             return []
 
-        meta_sql = self._sql_manager.get("processing_getmeta")
         listings: list[DatabaseListing] = []
 
         for name in sorted(os.listdir(self._db_dir)):
@@ -129,7 +131,7 @@ class PastDataManager(DataManager):
             try:
                 conn = sqlite3.connect(path)
                 conn.row_factory = sqlite3.Row
-                row = conn.execute(meta_sql).fetchone()
+                row = conn.execute(sql.getmeta).fetchone()
                 conn.close()
             except sqlite3.Error:
                 continue
@@ -159,8 +161,7 @@ class PastDataManager(DataManager):
         if self._min_min_ts != 0 or self._max_max_ts != 0:
             return (self._min_min_ts, self._max_max_ts)
 
-        bounds_sql = self._sql_manager.get("processing_getmaxmints")
-        row = self.execute(bounds_sql).fetchone()
+        row = self.execute(sql.getminmaxts).fetchone()
         if row is None:
             self._min_min_ts, self._max_max_ts = (0, 0)
         else:
@@ -174,14 +175,7 @@ class PastDataManager(DataManager):
 
     def get_overview(self) -> dict | None:
         self._ensure_selected_database()
-        row = self.fetch_one_dict(# TODO FIXME I belong in a SQL file
-            """
-            SELECT hostname, kernelver, distro, ipaddr, macaddr,
-                   processor, processor_vend, ram_gbs
-            FROM overviewdata
-            LIMIT 1
-            """
-        )
+        row = self.fetch_one_dict(sql.getoverview)
         if row is None:
             return None
         return {key: value for key, value in row.items() if value not in (None, "", 0)}

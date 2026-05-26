@@ -1,1 +1,4 @@
-SELECT db_time, overseer_ver FROM metadata;
+SELECT
+    db_time
+  , overseer_ver
+FROM metadata;
