@@ -1,7 +1,5 @@
 """Historical SQL data manager for archived Overseer session databases."""
 
-from __future__ import annotations
-
 import os
 import sqlite3
 from dataclasses import dataclass
