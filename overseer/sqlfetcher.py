@@ -14,19 +14,21 @@ class SQLManagementError(Exception):
 class SQLManager:
     __ALIASES = {
         # data inputs
-        "initdb": "in/initdb.sql",
+        "initdb":     "in/initdb.sql",
         "entryevent": "in/entryevent.sql",
-        "entryproc": "in/entryproc.sql",
-        "entryperf": "in/entryperf.sql",
+        "entryproc":  "in/entryproc.sql",
+        "entryperf":  "in/entryperf.sql",
 
         # data outputs
-        "getmeta": "out/getmeta_past.sql",
-        "getcpu": "out/getcpu_past.sql",
-        "geteps": "out/geteps_past.sql",
-        "getprocs": "out/getprocs_past.sql",
+        "getmeta":          "out/getmeta_past.sql",
+        "getcpu":           "out/getcpu_past.sql",
+        "geteps":           "out/geteps_past.sql",
+        "getprocs":         "out/getprocs_past.sql",
         "getprocsoverview": "out/getprocsoverview.sql",
-        "getminmaxts": "out/getminmaxts_past.sql",
-        "getoverview": "out/getoverview_past.sql"
+        "getminmaxts":      "out/getminmaxts_past.sql",
+        "getoverview":      "out/getoverview_past.sql",
+        "geteventsbytype":  "out/geteventsbytype.sql",
+        "geteventsbypid":   "out/geteventsbypid.sql"
     }
 
     def __init__(self, sqldir="sql"):
