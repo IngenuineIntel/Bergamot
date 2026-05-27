@@ -178,8 +178,7 @@ class PastDataManager:
             pass
         
         self.__db, self.__conn, self.__cursor, self.__min_ts, self.__max_ts,
-        self.__min_min_ts, self.__max_max_ts =
-        (None,) * 7
+        self.__min_min_ts, self.__max_max_ts = (None,) * 7
 
     @database.setter
     def database(self, val):
@@ -297,6 +296,16 @@ class PastDataManager:
         """Events per second within bounds."""
         self.__confirm_bounds()
         return self.__fetchall(sql.geteps, self.__defaultparams())
+
+    def geteventsbytype(self, type: str) -> list:
+        """Events filtered by syscall type within bounds."""
+        self.__confirm_bounds()
+        return self.__fetchall(sql.geteventsbytype, self.__defaultparams(type=type))
+
+    def geteventsbypid(self, pid: int) -> list:
+        """Events filtered by PID within bounds."""
+        self.__confirm_bounds()
+        return self.__fetchall(sql.geteventsbypid, self.__defaultparams(pid=pid))
 
 
 # ── QUERYING SYSTEMS - LiveDataManager ───────────────────────────────────── #
