@@ -12,20 +12,22 @@ from sqlfetcher import sql
 
 class DataManagementUsageWarning(Warning):
     """
-    Warning against unintended use of the calling object in order to minimize
+    Warning against unintended use of the callee object in order to minimize
     the spread of silent bugs.
     """
 
 class DataManagementUsageError(Exception):
     """
-    Exception against unintended use of the calling object where execution
+    Exception against unintended use of the callee object where execution
     should not be allowed to continue.
     """
 
 class DataManagementError(Exception):
     """
-    Something didn't work, either an exception or a definition. This is
-    acceptable in execution flow and should be handled accordingly.
+    Something didn't work. This is acceptable in execution flow and should be
+    handled accordingly. This exception is often used as a wrapper for other
+    internal errors, but I've consolidated those errors so they can be handled
+    by whichever code called whatever in this file threw the error.
     """
 
 @dataclass(slots=True)
@@ -73,7 +75,8 @@ class PastDataManager:
     .getprocs()
     .getperf()
     .geteps()
-    TODO syscall_specific SQL
+    .geteventsbypid()
+    .geteventsbytype()
 
     Notes:
     - this docstring is incomplete (TODO)
@@ -82,6 +85,7 @@ class PastDataManager:
 
     def __init__(self, db_dir="db", sql_dir="sql"):
 
+        # TODO I don't think that path calculations fit the scope of a class
         self.__base_dir: str = os.path.dirname(os.path.abspath(__file__))
         self.__db_dir:   str = os.path.join(self.__base_dir, db_dir)
 
@@ -307,6 +311,12 @@ class PastDataManager:
         self.__confirm_bounds()
         return self.__fetchall(sql.geteventsbypid, self.__defaultparams(pid=pid))
 
+    # TODO not the responsibility of a database management object, this needs
+    # to go elsewhere
+    @classmethod
+    def database_listings(cls):
+        pass
+
 
 # ── QUERYING SYSTEMS - LiveDataManager ───────────────────────────────────── #
 
@@ -314,4 +324,45 @@ class LiveDataManager:
     """
     Connection and query manager for querying live databases.
     """
+    def __init__(self, db: str, db_dir=""):
+        pass # TODO
+
+# ── DATABASE POPULATING ──────────────────────────────────────────────────── #
+
+@dataclass
+class EvntRow:
     pass # TODO
+
+@dataclass
+class ProcRow:
+    pass # TODO
+
+@dataclass
+class PerfRow:
+    pass # TODO
+
+class DataPopulator:
+    """Database populator."""
+    def __init__(self, db: str):
+        try:
+            # expecting a full path from `db`; no path resolution inline here.
+            # couldn't be bothered, its outside the scope of a class.
+            # Also not going to check if there's already a database here; if
+            # there is, it'll get written into :(
+            self.__db = db
+            self.__conn = sqlite3.connect(self.__db)
+            self.__cursor = self.__conn.cursor()
+        except sqlite3.OperationalError as e:
+            del self
+            raise DataManagementError(e)
+
+    def __ins_row(self, row: EvntRow | ProcRow | PerfRow):
+        pass # TODO
+
+    # TODO
+
+# ── GLOBALS ──────────────────────────────────────────────────────────────── #
+
+pdm = PastDataManager()
+ldm = LiveDataManager()
+dp  = DataPopulator()
