@@ -174,6 +174,8 @@ class PastDataManager:
     def __close_database(self):
         try:
             self.__conn.close()
+        except:
+            pass
         
         self.__db, self.__conn, self.__cursor, self.__min_ts, self.__max_ts,
         self.__min_min_ts, self.__max_max_ts =
