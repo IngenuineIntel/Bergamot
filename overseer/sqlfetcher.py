@@ -24,6 +24,7 @@ class SQLManager:
         "getcpu": "out/getcpu_past.sql",
         "geteps": "out/geteps_past.sql",
         "getprocs": "out/getprocs_past.sql",
+        "getprocsoverview": "out/getprocsoverview.sql",
         "getminmaxts": "out/getminmaxts_past.sql",
         "getoverview": "out/getoverview_past.sql"
     }
@@ -46,15 +47,16 @@ class SQLManager:
                 raise SQLManagementError(f"Couldn't access file {path}")
 
     def __sub_getattr__(self, key):
-        if key == "__all__":
-            return list((*self.__internal_aliases.keys(), "dbg_index"))
-
         ret = None
+
         with contextlib.suppress(KeyError):
             ret = self.__internal_aliases[key]
 
         if not ret:
-            raise AttributeError(f"'{type(self)}' as no attribute '{key}'. Try running `SQLManager.dbg_index()` to get a list of SQL aliases.")
+            raise AttributeError(
+                f"'{type(self)}' as no attribute '{key}'. Try running "
+                +"`SQLManager.dbg_index()` to get a list of SQL aliases."
+            )
 
         return ret
 
