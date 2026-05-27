@@ -41,12 +41,11 @@ CREATE TABLE events (
   , subtype TEXT -- further minutia of the specific syscall
   , comm TEXT -- process command
   , arg1 TEXT -- syscall argument (usually *rdi)
-    -- No other implementation of the protocol has `arg2` - but one
-    -- day they might
   , arg2 TEXT -- syscall argument (usually *rsi)
   , retval INTEGER -- syscall return (rax when we're back in usermode)
 );
 
+-- FIXME why are there so many not NOT NULLs?
 CREATE TABLE procs (
     id INTEGER PRIMARY KEY AUTOINCREMENT
   , pid INTEGER NOT NULL
