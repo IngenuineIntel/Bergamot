@@ -9,6 +9,10 @@ from sqlfetcher import sql
 
 
 # ── UTILITY OBJECTS ──────────────────────────────────────────────────────── #
+# Q: Why so many exceptions?
+# A: Because it's really explicit, exception messages can help developers, and
+# because its easier to try|except than it is to parse retcodes, not to mention
+# the loss of readability that would be associated with retcode parsing.
 
 class DataManagementUsageWarning(Warning):
     """
@@ -19,7 +23,8 @@ class DataManagementUsageWarning(Warning):
 class DataManagementUsageError(Exception):
     """
     Exception against unintended use of the callee object where execution
-    should not be allowed to continue.
+    should not be allowed to continue. This exception should not be caught, as
+    it should never be raised at all.
     """
 
 class DataManagementError(Exception):
@@ -28,6 +33,16 @@ class DataManagementError(Exception):
     handled accordingly. This exception is often used as a wrapper for other
     internal errors, but I've consolidated those errors so they can be handled
     by whichever code called whatever in this file threw the error.
+
+    A PastDataManager or LiveDataManager object failed to do something
+    correctly. These should be expected and handled in the calling code, not
+    within the raising class.
+    """
+
+class DataPopulationError(Exception):
+    """
+    A DataPopulator object failed to do something correctly. These should be
+    expected and handled in the method calling code.
     """
 
 @dataclass(slots=True)
@@ -330,16 +345,62 @@ class LiveDataManager:
 # ── DATABASE POPULATING ──────────────────────────────────────────────────── #
 
 @dataclass
+class OvervRow:
+    hostname:       str = "unknown"
+    kernelver:      str = "unknown"
+    distro:         str = "unknown"
+    ipaddr:         str = "unknown"
+    macaddr:        str = "unknown"
+    processor:      str = "unknown"
+    processor_vend: str = "unknown"
+    ram_gbs:        int = 0
+
+# TODO Ken Thompson regretted `creat`, will I regret `EvntRow`?
+@dataclass
 class EvntRow:
-    pass # TODO
+    #id: int
+    ts_s:    int
+    ts_ms:   int
+    pid:     int
+    type:    str
+    subtype: str | None
+    arg1:    str | None
+    arg2:    str | None
+    retval:  int
 
 @dataclass
 class ProcRow:
-    pass # TODO
+    #id: int
+    pid: int
+    first_seen_ts_s:  int
+    first_seen_ts_ms: int
+    last_seen_ts_s:   int
+    last_seen_ts_ms:  int
+    ended_ts_s:       int | None
+    ended_ts_ms:      int | None
+    first_uid:        int
+    first_ppid:       int
+    first_comm:       str
+    last_uid:         int | None
+    last_ppid:        int | None
+    last_comm:        str | None
 
 @dataclass
 class PerfRow:
-    pass # TODO
+    #id: int
+    ts_s: int
+    ts_ms: int
+    core_count: int
+    avg_cpu_pct: float
+    mem_total_kb: int
+    mem_free_kb: int
+    mem_available_kb: int
+    mem_cached_kb: int
+    load_1m: float
+    load_5m: float
+    load_15m: float
+    # TODO this is silly?
+    cores_json: text
 
 class DataPopulator:
     """Database populator."""
@@ -359,10 +420,31 @@ class DataPopulator:
     def __ins_row(self, row: EvntRow | ProcRow | PerfRow):
         pass # TODO
 
+    def __cast_row(self, row: str) -> EvntRow | ProcRow | PerfRow:
+        """Takes a row and 'casts' it into a *Row class."""
+        pass # TODO
+
+    def process_row(self, row: str) -> None:
+        """Parses decompiled rows and inserts it into the database.
+        Failures throw DataPopulationErrors.
+        """
+        self.__ins_row(self.__cast_row(row))
+
+    def reload(self, db: str):
+        """Better than redefinition"""
+        self.__init__(db)
+
     # TODO
+
+    @staticmethod
+    def resolve_db(db: str):
+        """Resolves path so __init__ doesn't have to"""
+        # TODO I don't actually think this is right
+        return os.path.realpath(db)
 
 # ── GLOBALS ──────────────────────────────────────────────────────────────── #
 
+# TODO maybe not globals..?
 pdm = PastDataManager()
 ldm = LiveDataManager()
 dp  = DataPopulator()

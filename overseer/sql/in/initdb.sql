@@ -32,17 +32,14 @@ INSERT INTO overviewdata VALUES (
 
 CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT
-  , ts_s INTEGER DEFAULT (unixepoch()) -- UNIX time
-  , ts_ms INTEGER -- additional milliseconds
-  , pid INTEGER -- PID
-  , ppid INTEGER -- PPID
-  , uid INTEGER -- UID
-  , type TEXT -- syscall (or syscall family) in question
+  , ts_s INTEGER NOT NULL DEFAULT (unixepoch()) -- UNIX time
+  , ts_ms INTEGER NOT NULL -- additional milliseconds
+  , pid INTEGER NOT NULL -- PID
+  , type TEXT NOT NULL -- syscall (or syscall family) in question
   , subtype TEXT -- further minutia of the specific syscall
-  , comm TEXT -- process command
   , arg1 TEXT -- syscall argument (usually *rdi)
   , arg2 TEXT -- syscall argument (usually *rsi)
-  , retval INTEGER -- syscall return (rax when we're back in usermode)
+  , retval INTEGER NOT NULL -- syscall return (rax when we're back in usermode)
 );
 
 -- FIXME why are there so many not NOT NULLs?
@@ -57,9 +54,9 @@ CREATE TABLE procs (
   , ended_ts_s INTEGER
   , ended_ts_ms INTEGER
 
-  , first_uid INTEGER
-  , first_ppid INTEGER
-  , first_comm TEXT
+  , first_uid INTEGER NOT NULL
+  , first_ppid INTEGER NOT NULL
+  , first_comm TEXT NOT NULL
   , last_uid INTEGER
   , last_ppid INTEGER
   , last_comm TEXT
