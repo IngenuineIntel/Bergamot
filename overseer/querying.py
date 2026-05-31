@@ -29,11 +29,6 @@ class DataManagementUsageError(Exception):
 
 class DataManagementError(Exception):
     """
-    Something didn't work. This is acceptable in execution flow and should be
-    handled accordingly. This exception is often used as a wrapper for other
-    internal errors, but I've consolidated those errors so they can be handled
-    by whichever code called whatever in this file threw the error.
-
     A PastDataManager or LiveDataManager object failed to do something
     correctly. These should be expected and handled in the calling code, not
     within the raising class.
@@ -42,7 +37,7 @@ class DataManagementError(Exception):
 class DataPopulationError(Exception):
     """
     A DataPopulator object failed to do something correctly. These should be
-    expected and handled in the method calling code.
+    expected and handled.
     """
 
 @dataclass(slots=True)
@@ -98,7 +93,7 @@ class PastDataManager:
     - incorrect usage of any sort throws a DataManagementUsageError
     """
 
-    def __init__(self, db_dir="db", sql_dir="sql"):
+    def __init__(self, db_dir="db"):
 
         # TODO I don't think that path calculations fit the scope of a class
         self.__base_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -210,7 +205,7 @@ class PastDataManager:
         else:
             __open_database(val)
 
-    def __fetchone(self, cmd: str, params=None) -> tuple | sqlite3.Row:
+    def __fetchone(self, cmd: str, params: dict | None = None) -> tuple:
         """
         Confirms SQLite connection and executes SQL `cmd` and returns a single
         row. `__fetchall()` returns all rows
@@ -219,7 +214,7 @@ class PastDataManager:
             raise DataManagementUsageError("Not connected to a database!")
         return self.__cursor.execute(cmd, params).fetchone()
 
-    def __fetchall(self, cmd: str, params=None) -> list[tuple]:
+    def __fetchall(self, cmd: str, params: dict | None = None) -> list[tuple]:
         """
         Confirms SQLite connection and executes SQL `cmd` and returns all data.
         """
@@ -236,13 +231,14 @@ class PastDataManager:
         ret = {
             "min_ts": self.__min_ts,
             "max_ts": self.__max_ts
-        }.update(kwargs)
+        }
+        ret.update(kwargs)
         return ret
 
     # FRONT FACING METHODS
 
     def connected(self) -> bool:
-        """"""
+        """A simple way to confirm connection."""
         return False if not self.__db else True
 
     def calculate_timestamps(self) -> tuple(int, int):
@@ -326,10 +322,9 @@ class PastDataManager:
         self.__confirm_bounds()
         return self.__fetchall(sql.geteventsbypid, self.__defaultparams(pid=pid))
 
-    # TODO not the responsibility of a database management object, this needs
-    # to go elsewhere
-    @classmethod
-    def database_listings(cls):
+    @staticmethod
+    def database_listings(dir: str):
+        """Gets listings of databases in a given directory."""
         pass
 
 
@@ -339,8 +334,26 @@ class LiveDataManager:
     """
     Connection and query manager for querying live databases.
     """
-    def __init__(self, db: str, db_dir=""):
-        pass # TODO
+    def __init__(self, db: str):
+        # assuming `db` is a correct path
+        try:
+            self.__db = db
+            self.__conn: sqlite3.Connection = sqlite3.connect(self.__db)
+            self.__cursor = self.__conn.cursor()
+        except sqlite3.OperationalError as e:
+            raise DatabaseManagementError(e)
+
+    def __fetchone(self, cmd: str, params: dict | None = None) -> tuple:
+        return self.__cursor.execute(cmd, params).fetchone()
+    
+    def __fetchall(self, cmd: str, params: dict | None = None) -> list[tuple]:
+        return self.__cursor.execute(cmd, params).fetchall()
+
+
+    def getperf(self) -> tuple:
+        return self.__fetchall(sql.getcpu_live)
+
+    # TODO
 
 # ── DATABASE POPULATING ──────────────────────────────────────────────────── #
 
@@ -413,6 +426,7 @@ class DataPopulator:
             self.__db = db
             self.__conn = sqlite3.connect(self.__db)
             self.__cursor = self.__conn.cursor()
+            self.__cursor.execute(sql.initdb)
         except sqlite3.OperationalError as e:
             del self
             raise DataManagementError(e)
@@ -438,7 +452,7 @@ class DataPopulator:
 
     @staticmethod
     def resolve_db(db: str):
-        """Resolves path so __init__ doesn't have to"""
+        """Resolves path for __init__. Not called within the object."""
         # TODO I don't actually think this is right
         return os.path.realpath(db)
 

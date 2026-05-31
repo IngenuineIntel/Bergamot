@@ -19,7 +19,7 @@ class SQLManager:
         "entryproc":  "in/entryproc.sql",
         "entryperf":  "in/entryperf.sql",
 
-        # data outputs
+        # data outputs (past)
         "getmeta":          "out/getmeta_past.sql",
         "getcpu":           "out/getcpu_past.sql",
         "geteps":           "out/geteps_past.sql",
@@ -29,10 +29,16 @@ class SQLManager:
         "getoverview":      "out/getoverview_past.sql",
         "geteventsbytype":  "out/geteventsbytype.sql",
         "geteventsbypid":   "out/geteventsbypid.sql"
+    
+        # data outputs (live)
+        "getcpu_live":           "out/getcpu_live.sql",
+        "geteps_live":           "out/geteps_live.sql",
+        "getprocsoverview_live": "out/getprocsoverview_live.sql"
     }
 
     def __init__(self, sqldir="sql"):
 
+        # dict() to create a copy, not a reference
         self.__internal_aliases = dict(self.__ALIASES)
         
         self.__getattr_rlock = RLock()
@@ -45,8 +51,8 @@ class SQLManager:
                 with open(path, "r") as fd:
                     self.__internal_aliases[key] = fd.read().strip()
 
-            except FileNotFoundError:
-                raise SQLManagementError(f"Couldn't access file {path}")
+            except FileNotFoundError as e:
+                raise SQLManagementError(e)
 
     def __sub_getattr__(self, key):
         ret = None

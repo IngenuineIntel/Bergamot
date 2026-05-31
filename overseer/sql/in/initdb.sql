@@ -4,7 +4,7 @@ PRAGMA jorunal_mode=WAL;
 PRAGMA busy_timeout=5000;
 
 CREATE TABLE metadata (
-    db_time TEXT, -- time of initialization
+    db_time TEXT -- time of initialization
   , overseer_ver TEXT -- overseer version that created it
 );
 
