@@ -62,7 +62,7 @@ class SQLManager:
 
         if not ret:
             raise AttributeError(
-                f"'{type(self)}' as no attribute '{key}'. Try running "
+                f"'{type(self)}' has no attribute '{key}'. Try running "
                 +"`SQLManager.dbg_index()` to get a list of SQL aliases."
             )
 

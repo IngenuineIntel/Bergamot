@@ -8,3 +8,5 @@ FROM events
 WHERE ts_s >= :min_ts
     AND ts_s <= :max_ts
 GROUP BY y; 
+
+-- FIXME what was I thinking?

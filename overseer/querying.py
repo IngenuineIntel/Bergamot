@@ -8,7 +8,7 @@ import warnings
 from sqlfetcher import sql
 
 
-# ── UTILITY OBJECTS ──────────────────────────────────────────────────────── #
+# ── EXCEPTIONS ───────────────────────────────────────────────────────────── #
 # Q: Why so many exceptions?
 # A: Because it's really explicit, exception messages can help developers, and
 # because its easier to try|except than it is to parse retcodes, not to mention
@@ -40,6 +40,9 @@ class DataPopulationError(Exception):
     expected and handled.
     """
 
+
+# ── DATA OBJECTS ─────────────────────────────────────────────────────────── #
+
 @dataclass(slots=True)
 class DatabaseListing:
     """
@@ -51,13 +54,63 @@ class DatabaseListing:
     overseer_ver: str
     path: str
 
-    def __dict__(self) -> dict[str, str]:
-        return {
-            "db_name": self.db_name,
-            "db_time": self.db_time,
-            "overseer_ver": self.overseer_ver,
-            "path": self.path,
-        }
+@dataclass(slots=True)
+class OvervRow:
+    hostname:       str = "unknown"
+    kernelver:      str = "unknown"
+    distro:         str = "unknown"
+    ipaddr:         str = "unknown"
+    macaddr:        str = "unknown"
+    processor:      str = "unknown"
+    processor_vend: str = "unknown"
+    ram_gbs:        int = 0
+
+# TODO Ken Thompson regretted `creat`, will I regret `EvntRow`?
+@dataclass(slots=True)
+class EvntRow:
+    #id: int
+    ts_s:    int
+    ts_ms:   int
+    pid:     int
+    type:    str
+    subtype: str | None
+    arg1:    str | None
+    arg2:    str | None
+    retval:  int
+
+@dataclass(slots=True)
+class ProcRow:
+    #id: int
+    pid: int
+    first_seen_ts_s:  int
+    first_seen_ts_ms: int
+    last_seen_ts_s:   int
+    last_seen_ts_ms:  int
+    ended_ts_s:       int | None
+    ended_ts_ms:      int | None
+    first_uid:        int
+    first_ppid:       int
+    first_comm:       str
+    last_uid:         int | None
+    last_ppid:        int | None
+    last_comm:        str | None
+
+@dataclass(slots=True)
+class PerfRow:
+    #id: int
+    ts_s: int
+    ts_ms: int
+    core_count: int
+    avg_cpu_pct: float
+    mem_total_kb: int
+    mem_free_kb: int
+    mem_available_kb: int
+    mem_cached_kb: int
+    load_1m: float
+    load_5m: float
+    load_15m: float
+    # TODO this is silly?
+    cores_json: text
 
 
 # ── QUERYING SYSTEMS - PastDataManager ───────────────────────────────────── #
@@ -94,6 +147,8 @@ class PastDataManager:
     """
 
     def __init__(self, db_dir="db"):
+
+        # TODO RLock()
 
         # TODO I don't think that path calculations fit the scope of a class
         self.__base_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -350,70 +405,16 @@ class LiveDataManager:
         return self.__cursor.execute(cmd, params).fetchall()
 
 
-    def getperf(self) -> tuple:
+    def getperf(self) -> list:
         return self.__fetchall(sql.getcpu_live)
+
+    def geteps(self) -> :
+        return self.__fetc
 
     # TODO
 
+
 # ── DATABASE POPULATING ──────────────────────────────────────────────────── #
-
-@dataclass
-class OvervRow:
-    hostname:       str = "unknown"
-    kernelver:      str = "unknown"
-    distro:         str = "unknown"
-    ipaddr:         str = "unknown"
-    macaddr:        str = "unknown"
-    processor:      str = "unknown"
-    processor_vend: str = "unknown"
-    ram_gbs:        int = 0
-
-# TODO Ken Thompson regretted `creat`, will I regret `EvntRow`?
-@dataclass
-class EvntRow:
-    #id: int
-    ts_s:    int
-    ts_ms:   int
-    pid:     int
-    type:    str
-    subtype: str | None
-    arg1:    str | None
-    arg2:    str | None
-    retval:  int
-
-@dataclass
-class ProcRow:
-    #id: int
-    pid: int
-    first_seen_ts_s:  int
-    first_seen_ts_ms: int
-    last_seen_ts_s:   int
-    last_seen_ts_ms:  int
-    ended_ts_s:       int | None
-    ended_ts_ms:      int | None
-    first_uid:        int
-    first_ppid:       int
-    first_comm:       str
-    last_uid:         int | None
-    last_ppid:        int | None
-    last_comm:        str | None
-
-@dataclass
-class PerfRow:
-    #id: int
-    ts_s: int
-    ts_ms: int
-    core_count: int
-    avg_cpu_pct: float
-    mem_total_kb: int
-    mem_free_kb: int
-    mem_available_kb: int
-    mem_cached_kb: int
-    load_1m: float
-    load_5m: float
-    load_15m: float
-    # TODO this is silly?
-    cores_json: text
 
 class DataPopulator:
     """Database populator."""
