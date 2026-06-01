@@ -47,7 +47,7 @@ def _handle_client(conn: socket.socket, addr):
         "unknown_kind": 0,
     }
 
-    header_sz = wire_decoder.header_size
+    header_sz = wd.header_size
 
     try:
         while True:
@@ -58,12 +58,12 @@ def _handle_client(conn: socket.socket, addr):
             buf += chunk
 
             while len(buf) >= header_sz:
-                magic, version, kind, flags, _reserved, payload_len, checksum = wire_decoder.unpack_header(
+                magic, version, kind, flags, _reserved, payload_len, checksum = wd.unpack_header(
                     buf[:header_sz]
                 )
                 metrics["frames_rx"] += 1
 
-                metric_key, err = wire_decoder.validate_header(magic, version, flags, payload_len)
+                metric_key, err = wd.validate_header(magic, version, flags, payload_len)
                 if metric_key:
                     metrics[metric_key] += 1
                     print(f"[over-seer] protocol error from {addr}: {err}", flush=True)
@@ -76,13 +76,13 @@ def _handle_client(conn: socket.socket, addr):
                 payload = buf[header_sz:total]
                 buf = buf[total:]
 
-                if not wire_decoder.checksum_matches(payload, checksum):
+                if not wd.checksum_matches(payload, checksum):
                     metrics["bad_checksum"] += 1
                     print(f"[over-seer] protocol error from {addr}: checksum mismatch", flush=True)
                     return
 
                 try:
-                    ev = wire_decoder.decode_payload(kind, payload)
+                    ev = wd.decode_payload(kind, payload)
                     if not isinstance(ev, dict):
                         metrics["unknown_kind"] += 1
                         continue
@@ -102,7 +102,7 @@ def _handle_client(conn: socket.socket, addr):
                     store.add_event(ev)
                 except Exception as exc:
                     metrics["decode_err"] += 1
-                    print(f"[over-seer] binary decode failed for {addr}: {exc}", flush=True)
+                    print(f"[over-seer] decode failed for {addr}: {exc}", flush=True)
                     return
     except OSError:
         pass

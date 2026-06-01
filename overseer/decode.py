@@ -4,71 +4,6 @@ import os
 import struct
 import zlib
 
-@dataclass(slots=True)
-class Rows:
-
-    @dataclass(slots=True)
-    class OvervRow:
-        hostname:       str = "unknown"
-        kernelver:      str = "unknown"
-        distro:         str = "unknown"
-        ipaddr:         str = "unknown"
-        macaddr:        str = "unknown"
-        processor:      str = "unknown"
-        processor_vend: str = "unknown"
-        ram_gbs:        int = 0
-
-
-    # TODO Ken Thompson regretted `creat`, will I regret `EvntRow`?
-    @dataclass(slots=True)
-    class EvntRow:
-        #id: int
-        ts_s:    int
-        ts_ms:   int
-        pid:     int
-        type:    str
-        subtype: str | None
-        arg1:    str | None
-        arg2:    str | None
-        retval:  int
-
-    @dataclass(slots=True)
-    class ProcRow:
-        #id: int
-        pid: int
-        first_seen_ts_s:  int
-        first_seen_ts_ms: int
-        last_seen_ts_s:   int
-        last_seen_ts_ms:  int
-        ended_ts_s:       int | None
-        ended_ts_ms:      int | None
-        first_uid:        int
-        first_ppid:       int
-        first_comm:       str
-        last_uid:         int | None
-        last_ppid:        int | None
-        last_comm:        str | None
-
-    @dataclass(slots=True)
-    class PerfRow:
-        #id: int
-        ts_s: int
-        ts_ms: int
-        core_count: int
-        avg_cpu_pct: float
-
-        @dataclass(slots=True)
-        class mem:
-            total_kb: int
-            free_kb: int
-            available_kb: int
-            cached_kb: int
-
-        load_1m: float
-        load_5m: float
-        load_15m: float
-        # TODO this is silly?
-        cores_json: str
 
 class WireDecoder:
     WIRE_MAGIC = b"BGW1"
@@ -84,23 +19,6 @@ class WireDecoder:
     WIRE_ALLOWED_FLAGS = WIRE_FLAG_CHECKSUM
     HEADER_FORMAT = "!4sBBBBII"
 
-    WIRE_TYPE_MAP = {
-        1: "open",
-        2: "fork",
-        3: "connect",
-        4: "execve",
-        5: "accept",
-        6: "unlink",
-        7: "rename",
-        8: "setuid",
-        9: "setgid",
-        10: "setreuid",
-        11: "capset",
-        12: "keyctl",
-        13: "ptrace",
-        14: "getid",
-    }
-
     def __init__(self):
         try:
             self.max_frame_bytes = max(
@@ -112,17 +30,34 @@ class WireDecoder:
         self.header_size = struct.calcsize(self.HEADER_FORMAT)
 
     @staticmethod
-    def _read_u16(buf: bytes, pos: int):
-        if pos + 2 > len(buf):
-            raise ValueError("short u16")
-        return struct.unpack("!H", buf[pos:pos + 2])[0], pos + 2
+    def _to_int(val: str, name: str) -> int:
+        try:
+            return int(val)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid integer field {name}: {val!r}") from exc
 
-    def _read_str(self, buf: bytes, pos: int):
-        size, pos = self._read_u16(buf, pos)
-        end = pos + size
-        if end > len(buf):
-            raise ValueError("short string")
-        return buf[pos:end].decode("utf-8", errors="replace"), end
+    @staticmethod
+    def _to_float(val: str, name: str) -> float:
+        try:
+            return float(val)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid float field {name}: {val!r}") from exc
+
+    @staticmethod
+    def _split_fields(payload: bytes):
+        if not payload:
+            return []
+        text = payload.decode("utf-8", errors="replace")
+        fields = text.split("\x00")
+        if fields and fields[-1] == "":
+            fields.pop()
+        return fields
+
+    @staticmethod
+    def _next(fields, idx: int, name: str):
+        if idx >= len(fields):
+            raise ValueError(f"missing field {name}")
+        return fields[idx], idx + 1
 
     def unpack_header(self, data: bytes):
         if len(data) < self.header_size:
@@ -148,64 +83,47 @@ class WireDecoder:
         return checksum == calc_sum
 
     def decode_system_info(self, payload: bytes):
-        pos = 0
-        hostname, pos = self._read_str(payload, pos)
-        kernelver, pos = self._read_str(payload, pos)
-        distro, pos = self._read_str(payload, pos)
-        ipaddr, pos = self._read_str(payload, pos)
-        macaddr, pos = self._read_str(payload, pos)
-        processor, pos = self._read_str(payload, pos)
-        processor_vend, pos = self._read_str(payload, pos)
-        if pos + 4 > len(payload):
-            raise ValueError("short ram_gbs")
-        ram_gbs = struct.unpack("!i", payload[pos:pos + 4])[0]
+        fields = self._split_fields(payload)
+        if len(fields) != 8:
+            raise ValueError(f"system_info expects 8 fields, got {len(fields)}")
+
+        ram_gbs = self._to_int(fields[7], "ram_gbs")
 
         return {
             "kind": "system_info",
-            "hostname": hostname,
-            "kernelver": kernelver,
-            "distro": distro,
-            "ipaddr": ipaddr,
-            "macaddr": macaddr,
-            "processor": processor,
-            "processor_vend": processor_vend,
+            "hostname": fields[0],
+            "kernelver": fields[1],
+            "distro": fields[2],
+            "ipaddr": fields[3],
+            "macaddr": fields[4],
+            "processor": fields[5],
+            "processor_vend": fields[6],
             "ram_gbs": ram_gbs,
         }
 
     def decode_event(self, payload: bytes):
-        base_sz = struct.calcsize("!qHiiiB")
-        if len(payload) < base_sz:
-            raise ValueError("short event header")
-        ts_s, ts_ms, pid, ppid, uid, type_id = struct.unpack("!qHiiiB", payload[:base_sz])
-        retval = 0
+        fields = self._split_fields(payload)
+        if len(fields) != 11:
+            raise ValueError(f"event expects 11 fields, got {len(fields)}")
 
-        def _decode_event_fields(start_pos: int):
-            field_pos = start_pos
-            subtype_val, field_pos = self._read_str(payload, field_pos)
-            comm_val, field_pos = self._read_str(payload, field_pos)
-            arg1_val, field_pos = self._read_str(payload, field_pos)
-            arg2_val, field_pos = self._read_str(payload, field_pos)
-            if field_pos != len(payload):
-                raise ValueError("trailing event payload bytes")
-            return subtype_val, comm_val, arg1_val, arg2_val
+        ts_s = self._to_int(fields[0], "ts_s")
+        ts_ms = self._to_int(fields[1], "ts_ms")
+        pid = self._to_int(fields[2], "pid")
+        ppid = self._to_int(fields[3], "ppid")
+        uid = self._to_int(fields[4], "uid")
+        ev_type = fields[5] or "unknown"
+        retval = self._to_int(fields[6], "retval")
+        subtype = fields[7]
+        comm = fields[8]
+        arg1 = fields[9]
+        arg2 = fields[10]
 
-        retval_sz = struct.calcsize("!q")
-        try:
-            if len(payload) < base_sz + retval_sz:
-                raise ValueError("short retval field")
-            (retval,) = struct.unpack("!q", payload[base_sz:base_sz + retval_sz])
-            subtype, comm, arg1, arg2 = _decode_event_fields(base_sz + retval_sz)
-        except ValueError:
-            retval = 0
-            subtype, comm, arg1, arg2 = _decode_event_fields(base_sz)
-
-        ev_type = self.WIRE_TYPE_MAP.get(type_id, "unknown")
         out_arg2 = arg2
-        if ev_type == "ptrace" and arg2:
+        if ev_type == "ptrace" and out_arg2:
             try:
-                out_arg2 = int(arg2)
+                out_arg2 = int(out_arg2)
             except ValueError:
-                out_arg2 = arg2
+                pass
 
         return {
             "ts_s": int(ts_s),
@@ -223,33 +141,42 @@ class WireDecoder:
         }
 
     def decode_rich_proc_snapshot(self, payload: bytes):
-        header_sz = struct.calcsize("!qHH")
-        if len(payload) < header_sz:
-            raise ValueError("short rich snapshot header")
-        ts_s, ts_ms, count = struct.unpack("!qHH", payload[:header_sz])
-        pos = header_sz
-        rows = []
+        fields = self._split_fields(payload)
+        idx = 0
+        ts_s_s, idx = self._next(fields, idx, "ts_s")
+        ts_ms_s, idx = self._next(fields, idx, "ts_ms")
+        count_s, idx = self._next(fields, idx, "count")
 
-        row_sz = struct.calcsize("!iiiHQI")
+        ts_s = self._to_int(ts_s_s, "ts_s")
+        ts_ms = self._to_int(ts_ms_s, "ts_ms")
+        count = self._to_int(count_s, "count")
+        if count < 0:
+            raise ValueError("invalid negative process count")
+
+        rows = []
         for _ in range(count):
-            if pos + row_sz > len(payload):
-                raise ValueError("short rich snapshot row")
-            pid, ppid, uid, threads, cpu_ticks, vm_rss_kb = struct.unpack(
-                "!iiiHQI", payload[pos:pos + row_sz]
-            )
-            pos += row_sz
-            comm, pos = self._read_str(payload, pos)
+            pid_s, idx = self._next(fields, idx, "pid")
+            ppid_s, idx = self._next(fields, idx, "ppid")
+            uid_s, idx = self._next(fields, idx, "uid")
+            threads_s, idx = self._next(fields, idx, "threads")
+            cpu_ticks_s, idx = self._next(fields, idx, "cpu_ticks")
+            vm_rss_kb_s, idx = self._next(fields, idx, "vm_rss_kb")
+            comm, idx = self._next(fields, idx, "comm")
+
             rows.append(
                 {
-                    "pid": int(pid),
-                    "ppid": int(ppid),
-                    "uid": int(uid),
+                    "pid": self._to_int(pid_s, "pid"),
+                    "ppid": self._to_int(ppid_s, "ppid"),
+                    "uid": self._to_int(uid_s, "uid"),
                     "comm": comm,
-                    "threads": int(threads),
-                    "cpu_ticks": int(cpu_ticks),
-                    "vm_rss_kb": int(vm_rss_kb),
+                    "threads": self._to_int(threads_s, "threads"),
+                    "cpu_ticks": self._to_int(cpu_ticks_s, "cpu_ticks"),
+                    "vm_rss_kb": self._to_int(vm_rss_kb_s, "vm_rss_kb"),
                 }
             )
+
+        if idx != len(fields):
+            raise ValueError("trailing rich snapshot payload fields")
 
         return {
             "kind": "rich_proc_snapshot",
@@ -259,18 +186,24 @@ class WireDecoder:
         }
 
     def decode_system_perf(self, payload: bytes):
-        header_sz = struct.calcsize("!qHBx")
-        if len(payload) < header_sz:
-            raise ValueError("short system_perf header")
-        ts_s, ts_ms, num_cores = struct.unpack("!qHBx", payload[:header_sz])
-        pos = header_sz
+        fields = self._split_fields(payload)
+        idx = 0
+        ts_s_s, idx = self._next(fields, idx, "ts_s")
+        ts_ms_s, idx = self._next(fields, idx, "ts_ms")
+        num_cores_s, idx = self._next(fields, idx, "num_cores")
 
-        core_sz = struct.calcsize("!7Q")
+        ts_s = self._to_int(ts_s_s, "ts_s")
+        ts_ms = self._to_int(ts_ms_s, "ts_ms")
+        num_cores = self._to_int(num_cores_s, "num_cores")
+        if num_cores < 0:
+            raise ValueError("invalid negative core count")
+
         cores = []
         for _ in range(num_cores):
-            if pos + core_sz > len(payload):
-                raise ValueError("short system_perf core block")
-            vals = struct.unpack("!7Q", payload[pos:pos + core_sz])
+            vals = []
+            for name in ("user", "nice", "system", "idle", "iowait", "irq", "softirq"):
+                raw, idx = self._next(fields, idx, f"core_{name}")
+                vals.append(self._to_int(raw, f"core_{name}"))
             cores.append(
                 {
                     "user": vals[0],
@@ -282,20 +215,17 @@ class WireDecoder:
                     "softirq": vals[6],
                 }
             )
-            pos += core_sz
 
-        mem_sz = struct.calcsize("!4Q")
-        if pos + mem_sz > len(payload):
-            raise ValueError("short system_perf mem block")
-        mem_total, mem_free, mem_available, mem_cached = struct.unpack(
-            "!4Q", payload[pos:pos + mem_sz]
-        )
-        pos += mem_sz
+        mem_total_s, idx = self._next(fields, idx, "mem_total_kb")
+        mem_free_s, idx = self._next(fields, idx, "mem_free_kb")
+        mem_available_s, idx = self._next(fields, idx, "mem_available_kb")
+        mem_cached_s, idx = self._next(fields, idx, "mem_cached_kb")
+        l1_s, idx = self._next(fields, idx, "load_1m")
+        l5_s, idx = self._next(fields, idx, "load_5m")
+        l15_s, idx = self._next(fields, idx, "load_15m")
 
-        load_sz = struct.calcsize("!3H")
-        if pos + load_sz > len(payload):
-            raise ValueError("short system_perf load block")
-        l1_fp, l5_fp, l15_fp = struct.unpack("!3H", payload[pos:pos + load_sz])
+        if idx != len(fields):
+            raise ValueError("trailing system_perf payload fields")
 
         return {
             "kind": "system_perf",
@@ -303,15 +233,15 @@ class WireDecoder:
             "ts_ms": int(ts_ms),
             "cores": cores,
             "mem": {
-                "total_kb": int(mem_total),
-                "free_kb": int(mem_free),
-                "available_kb": int(mem_available),
-                "cached_kb": int(mem_cached),
+                "total_kb": self._to_int(mem_total_s, "mem_total_kb"),
+                "free_kb": self._to_int(mem_free_s, "mem_free_kb"),
+                "available_kb": self._to_int(mem_available_s, "mem_available_kb"),
+                "cached_kb": self._to_int(mem_cached_s, "mem_cached_kb"),
             },
             "load": {
-                "l1": round(l1_fp / 100, 2),
-                "l5": round(l5_fp / 100, 2),
-                "l15": round(l15_fp / 100, 2),
+                "l1": round(self._to_float(l1_s, "load_1m"), 2),
+                "l5": round(self._to_float(l5_s, "load_5m"), 2),
+                "l15": round(self._to_float(l15_s, "load_15m"), 2),
             },
         }
 
