@@ -261,3 +261,82 @@ INNER JOIN tbl2 ON
     tbl1.id = tbl2.id
 ORDER BY id DESC;
 ```
+
+## Formulas for Altering The Code
+
+Here's a few instructions on how to alter code in ways that future
+contributions are likely to do. Note that this will be in wiki format one day,
+but right now it lives here, because it's also a reference for myself.
+
+*Please note that if you fundamentally break any of these instructions, it is
+your responsibility to alter them or cull them if they no longer serve a
+purpose.*
+
+### How to: Alter the Wire Protocol
+
+Sending the wire protocol is done in `agent/protocol.pyx`; decoding the wire
+protocol is done in `overseer/decode.py`. The resulting data from decoding is
+stored in a `decode.Row.*Row` class.
+
+The wire protocol has different payload types, that are simply interpreted as
+rows of various types after being received by the Overseer.
+
+#### To Add a New Kind of Payload/Row
+
+- `overseer/decode.py`
+    - Add a nested class in `Rows` for the new type of row.
+    - Add a `WIRE_KIND_*` variable at the top of `WireDecoder`.
+    - Add a method in `WireDecoder` for decoding this new kind of row.
+    - Add logic for calling said method in `WireDecoder.decode_payload()`.
+- `agent/protocol.pyx`.
+    - Add a `WIRE_KIND_*` variable at the top of the file.
+    - Add a `encode_*_payload()` function for your new payload.
+    - Add logic in `encode_wire_payload()` that calls your encode function.
+
+Lastly, write code in the Agent to populate your payload, and write code in the
+Overseer to visualize the row.
+
+#### To Remove a Type of Payload/Row
+
+- `overseer/decode.py`
+    - Remove the nested class in `Rows` that represents the row.
+    - Remove the `WIRE_KIND_*` variable at the top of `WireDecoder` that
+    represents the kind of row.
+    - Remove the method in `WireDecoder` that decodes this kind of row.
+    - Remove logic from `WireDecoder.decode_payload()`.
+- `agent/protocol.pyx`
+    - Remove the `WIRE_KIND_*` variable at the top of the file that represents
+    the payload type.
+    - Remove the `encode_*_payload()` function representative of the payload.
+    - Remove the logic calling said function in `encode_wire_payload()`.
+
+#### To Add Fields to Preexisting Payloads/Rows
+
+<sub>
+Note: after Bergamot v1.0 (& wire protocol v1.0), adding a new field will
+substantiate a new wire version.
+</sub>
+
+- `agent/protocol.pyx`
+    - Alter the `encode_*_payload()` function representative of your payload
+    to include the new row.
+    - *IF POSSIBLE, _PLEASE_* keep backwards compatibility with the previous
+    version, and leave comments notating this behavior.
+- `overseer/decode.py`
+    - Add an attribute for your field in the necessary row class in `Rows`.
+    - Alter the `encode_*_payload()` method to utilize this new field
+    - Again, *TRY TO MAINTAIN BACKWARDS COMPATIBILITY*.
+- `overseer/querying.py`
+    - Make sure `DataPopulator.__cast_row()` can handle the new field.
+- `overseer/sql/in/initdb.sql`
+    - Include this new row into whatever part of the SQL database is required.
+- `overseer/sql/*/*`
+    - Make sure that the SQL scripts are prepared for this new field.
+
+#### To Remove Fields to Preexisting Payloads/Rows
+
+##### Soft Change (doesn't require wire protcol version change)
+
+TODO
+---
+
