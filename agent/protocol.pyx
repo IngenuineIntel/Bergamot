@@ -1,162 +1,402 @@
-"""Bergamot wire protocol constants and frame encoding helpers."""
+# protocol.pyx
 
-import struct
+from dataclass import dataclass
 import zlib
 
-WIRE_MAGIC = b"BGW1"
-WIRE_VERSION = 1          # wire byte; protocol version 1.0
-WIRE_VERSION_STR = "1.0"
 
-WIRE_KIND_SYSTEM_INFO        = 1
-WIRE_KIND_EVENT              = 2
-WIRE_KIND_RICH_PROC_SNAPSHOT = 4
-WIRE_KIND_SYSTEM_PERF        = 5
+# ── PROTOCOL SETTINGS ────────────────────────────────────────────────────── #
 
-WIRE_FLAG_CHECKSUM = 0x01
+@dataclass(slots=True)
+cdef class FrameKinds:
+    cdef int sysinfo = 0
+    cdef int event   = 1
+    cdef int procs   = 2
+    cdef int perf    = 3
 
-def _field(val: object) -> bytes:
-    # Keep payload format simple: UTF-8 fields joined by NUL delimiters.
-    return str(val or "").replace("\x00", " ").encode("utf-8", errors="replace")
+@dataclass(slots=True)
+class CompressionKinds:
+    cdef int deflate_flag = 0
+    #cdef int lz4_flag    = 1
+    #cdef int lzma_flag   = 2
+    # etc.
 
+    @classmethod
+    def getflag(cls, str algorithm):
+        match algorithm:
+            case "deflate":
+                return cls.deflate_flag
+            case _:
+                return cls.deflate_flag
 
-def _join_fields(fields) -> bytes:
-    return b"\x00".join([_field(v) for v in fields]) + b"\x00"
+@dataclass(slots=True)
+cdef class ProtocolSettings:
 
+    # compression settings
+    cdef str algorithm = "deflate"
+    cdef int compression_lvl = 6
+    
+    cdef object comp = CompressionKinds()
+    cdef object kinds = FrameKinds()
 
-def encode_system_info_payload(obj: dict) -> bytes:
-    return _join_fields([
-        obj.get("hostname", ""),
-        obj.get("kernelver", ""),
-        obj.get("distro", ""),
-        obj.get("ipaddr", ""),
-        obj.get("macaddr", ""),
-        obj.get("processor", ""),
-        obj.get("processor_vend", ""),
-        int(obj.get("ram_gbs", 0) or 0),
-    ])
+    # start magic
+    cdef int magic = b"BRGMTWP\x00"
 
+    # version settings
+    cdef int version_major = 1
+    cdef int version_minor = 0
+    
+    # XOR mask
+    cdef int mask = 0xB3484307
 
-def encode_event_payload(obj: dict) -> bytes:
-    ev_type = str(obj.get("type", "") or "")
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    pid = int(obj.get("pid", 0) or 0)
-    ppid = int(obj.get("ppid", 0) or 0)
-    uid = int(obj.get("uid", 0) or 0)
-    retval = int(obj.get("retval", 0) or 0)
+    # field delimiter
+    cdef int delim = 0xFF.to_bytes(1)
 
-    return _join_fields([
-        ts_s,
-        ts_ms,
-        pid,
-        ppid,
-        uid,
-        ev_type,
-        retval,
-        obj.get("subtype", ""),
-        obj.get("comm", ""),
-        obj.get("arg1", obj.get("arg", "")),
-        obj.get("arg2", ""),
-    ])
+    # row delimiter
+    cdef int rowdelim = 0xFE.to_bytes(1)
 
+    class FlagGenError(Exception):
+        """Errors in flag generation are handled like this."""
 
-def encode_rich_snapshot_payload(obj: dict) -> bytes:
-    """Encode kind=4 rich_proc_snapshot as NUL-delimited raw fields."""
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    rows = obj.get("processes", [])
-    if not isinstance(rows, list):
-        rows = []
-    if len(rows) > 65535:
-        rows = rows[:65535]
+    # TODO should I make this in C?
+    @classmethod
+    cdef bytes genflags(cls, int kind, int data_len, int compressed_len):
+        """
+        Generates the flags for a frame via bitpacking.
+        Note that all values that can't be 0 are -1 in transit to extend
+        potential values.
 
-    fields = [ts_s, ts_ms, len(rows)]
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        fields.extend([
-            int(row.get("pid", 0) or 0),
-            int(row.get("ppid", 0) or 0),
-            int(row.get("uid", 0) or 0),
-            int(row.get("threads", 0) or 0),
-            int(row.get("cpu_ticks", 0) or 0),
-            int(row.get("vm_rss_kb", 0) or 0),
-            row.get("comm", ""),
-        ])
+        Example:
 
-    return _join_fields(fields)
+        (first bit at top, last bit at bottom)
 
+        1 +--- protocol version (major) - 4 bits  - max 16
+        0 |
+        0 |
+        0 /
 
-def encode_system_perf_payload(obj: dict) -> bytes:
-    """Encode kind=5 system_perf as NUL-delimited raw fields."""
-    ts_s = int(obj.get("ts_s", 0) or 0)
-    ts_ms = int(obj.get("ts_ms", 0) or 0)
-    cores = obj.get("cores", [])
-    if not isinstance(cores, list):
-        cores = []
-    num_cores = min(len(cores), 255)
+        0 +--- protocol version (minor) - 4 bits  - max 15
+        0 |
+        0 |
+        0 /
 
-    mem = obj.get("mem", [0, 0, 0, 0])
-    load = obj.get("load", [0.0, 0.0, 0.0])
+        0 +--- compression type - 2 bits - max 4
+        0 /
 
-    fields = [ts_s, ts_ms, num_cores]
-    for core in cores[:num_cores]:
-        if not isinstance(core, list) or len(core) < 7:
-            core = [0] * 7
-        fields.extend([int(v) for v in core[:7]])
+        1 +--- compression level (if applicable) - 3 bits  - max 8
+        0 |
+        1 /
 
-    fields.extend([
-        int(mem[0]) if len(mem) > 0 else 0,
-        int(mem[1]) if len(mem) > 1 else 0,
-        int(mem[2]) if len(mem) > 2 else 0,
-        int(mem[3]) if len(mem) > 3 else 0,
-        float(load[0]) if len(load) > 0 else 0.0,
-        float(load[1]) if len(load) > 1 else 0.0,
-        float(load[2]) if len(load) > 2 else 0.0,
-    ])
+        0 +--- frame type - 3 bits  - max 4
+        0 |
+        0 /
 
-    return _join_fields(fields)
+        0 +--- data size (before compression) - 12 bits - max 4096
+        1 |
+        0 |
+        [SNIP]
+        1 |
+        0 /
 
+        0 +--- data size (after compression) - 12 bits - max 4096
+        0 |
+        1 |
+        [SNIP]
+        1 |
+        0 /
 
-def encode_frame(kind: int, payload: bytes) -> bytes:
-    csum = zlib.crc32(payload) & 0xFFFFFFFF
-    return struct.pack(
-        "!4sBBBBII",
-        WIRE_MAGIC,
-        WIRE_VERSION,
-        kind,
-        WIRE_FLAG_CHECKSUM,
-        0,
-        len(payload),
-        csum,
-    ) + payload
+        0 +--- XOR mask - 4 bytes - N/A
+        1 |
+        1 |
+        [SNIP]
+        1 |
+        0 /
 
+        0 +--- field delimiter - 1 byte  - N/A
+        1 |
+        0 |
+        [SNIP]
+        0 |
+        0 /
 
-def encode_wire_payload(obj: dict) -> tuple[int, bytes]:
-    if obj.get("kind") == "system_info":
-        return WIRE_KIND_SYSTEM_INFO, encode_system_info_payload(obj)
-    if obj.get("kind") == "rich_proc_snapshot":
-        return WIRE_KIND_RICH_PROC_SNAPSHOT, encode_rich_snapshot_payload(obj)
-    if obj.get("kind") == "system_perf":
-        return WIRE_KIND_SYSTEM_PERF, encode_system_perf_payload(obj)
-    return WIRE_KIND_EVENT, encode_event_payload(obj)
+        1 +--- row delimiter - 1 byte - N/A
+        1 |
+        1 |
+        [SNIP]
+        1 |
+        1 /
+
+        Total: 11 bytes
+
+        Notes:
+        1. if data sizes are >1024, the minimum value will be put
+        2. if other values are more than their maximum, None is returned
+        """
+
+        cdef double ret
+
+        ### data fetching ###
+
+        cdef int compression_flag = cls.comp.getflag(cls.algorithm)
 
 
-def event_frame_size_bytes(obj: dict) -> int:
-    if not isinstance(obj, dict):
-        return 0
-    kind, payload = encode_wire_payload(obj)
-    if kind != WIRE_KIND_EVENT:
-        return 0
-    return len(encode_frame(kind, payload))
+        ### size checking ###
+
+        # zlib compression level cannot be more than 9
+        if cls.compression_flag == cls.comp.deflate_flag and cls.compression_lvl > 9:
+            raise cls.FlagGenError("compression level cannot be more than 9 for deflate")
 
 
-def object_frame_size_bytes(obj: dict) -> int:
-    if not isinstance(obj, dict):
-        return 0
-    kind, payload = encode_wire_payload(obj)
-    return len(encode_frame(kind, payload))
+        ### preparing ###
+        
+        # +/- is higher in the order of operations than <</>>
+        ret = (
+            cls.version_major - 1
+            + (cls.version_minr << 4)
+            + (compression_flag << 8)
+            + (cls.compression_lvl - 1 << 10)
+            + (king << 13)
+            + (data_len -1 << 16)
+            + (compressed_len -1 << 28)
+        )
+
+        return ret.to_bytes(5) + cls.mask.to_bytes(4) + cls.delim + cls.rowdelim
 
 
-# Let's try again
+sets = ProtocolSettings()
 
+
+# ── COMPILATION & COMPRESSION ────────────────────────────────────────────── #
+
+@dataclass(slots=True)
+cdef class SystemInfo:
+    cdef str hostname
+    cdef str kernelver
+    cdef str distro
+    cdef str ipaddr
+    cdef str macaddr
+    cdef str processor
+    cdef str processor_vend
+    cdef int ram_gbs
+
+@dataclass(slots=True)
+cdef class Event:
+    cdef int ts_s
+    cdef int ts_ms
+    cdef int pid
+    cdef str type
+    cdef str subtype
+    cdef str arg1
+    cdef str arg2
+    cdef int retval
+
+@dataclass(slots=True)
+cdef class ProcSnapshot:
+    cdef int ts_s
+    cdef int ts_ms
+    cdef list processes
+
+@dataclass(slots=True)
+cdef class Proc:
+    cdef int pid
+    cdef int ppid
+    cdef int uid
+    cdef int threads
+    cdef int cpu_ticks
+    cdef int vm_rss_kb
+    cdef int comm
+
+@dataclass(slots=True)
+cdef class Perf:
+    cdef int ts_s
+    cdef int ts_ms
+    cdef int cores
+    cdef float avg_cpu_pct
+    cdef int mem_total_kb
+    cdef int mem_free_kb
+    cdef int mem_available_kb
+    cdef int mem_cached_kb
+    cdef float load_1m
+    cdef float load_5m
+    cdef float load_15m
+    cdef str cores_json
+
+
+# compression wrapper for simplicity dtl
+cdef bytes compress(bytes b):
+    cdef bytes ret
+    match ProtocolSettings.algorithm:
+        case "deflate":
+            ret = zlib.compress(b, level=sets.compression_lvl)
+        case _: # default is deflate
+            ret = zlib.compress(b, level=sets.compression_lvl)
+
+    for i in ret:
+        i ^= sets.mask
+    
+    return ret
+
+cdef bytes prep_field(object s):
+    if type(s) is str:
+        return s.encode("utf-8", errors="replace")
+            .replace(sets.delim,    b" ")
+            .replace(sets.rowdelim, b" ") + sets.delim
+    elif type(s) is int:
+        return str(s).encode("utf-8", errors="replace") + sets.delim
+    elif type(s) is float:
+        return str(s).encode("utf-8", errors="replace") + sets.delim
+
+
+### SYSTEM_INFO ###
+
+cdef bytes compile_system_info(list objs):
+    cdef bytes data
+    
+    for obj in objs:
+        data += prep_field(obj.hostname)
+        data += prep_field(obj.kernelver)
+        data += prep_field(obj.distro)
+        data += prep_field(obj.ipaddr)
+        data += prep_field(obj.macaddr)
+        data += prep_field(obj.processor)
+        data += prep_field(obj.processor_vend)
+        data += prep_field(obj.ram_gbs)
+
+        data += sets.rowdelim
+
+    return data
+
+cdef bytes gen_system_info(list objs):
+    cdef bytes data
+    cdef bytes body
+
+    cdef int body_sz
+    cdef int compressed_sz
+
+    body = compile_system_info(objs)
+    body_sz = len(body)
+
+    body = compress(body)
+    compressed_sz = len(body)
+
+    data += sets.magic
+    data += sets.genflags(sets.kinds.sysinfo, body_sz, compressed_sz)
+    data += body
+
+    return data
+
+
+### EVENT ###
+
+cdef bytes compile_event(list objs):
+    cdef bytes data
+
+    for obj in objs:
+        data += prep_field(obj.ts_s)
+        data += prep_field(obj.ts_ms)
+        data += prep_field(obj.type)
+        data += prep_field(obj.subtype)
+        data += prep_field(obj.arg1)
+        data += prep_field(obj.arg2)
+        data += prep_field(obj.retval)
+
+        data += sets.rowdelim
+    
+    return data
+
+cdef bytes gen_event(list objs):
+    cdef bytes data
+    cdef bytes body
+
+    cdef int body_sz
+    cdef int compressed_sz
+
+    body = compile_event(objs)
+    body_sz = len(body)
+
+    body = compress(body)
+    compressed_sz = len(body)
+
+    data += sets.magic
+    data += sets.genflags(sets.kinds.event, body_sz, compressed_sz)
+    data += body
+
+    return data
+
+
+### PROC_SNAPSHOT ###
+
+cdef bytes compile_proc_snapshot(object obj):
+    cdef bytes data
+
+    data += prep_field(obj.ts_s)
+    data += prep_field(obj.ts_ms)
+        
+    data += sets.rowdelim
+
+    for proc in obj.processes:
+        data += prep_field(obj.pid)
+        data += prep_field(obj.ppid)
+        data += prep_field(obj.uid)
+        data += prep_field(obj.threads)
+        data += prep_field(obj.cpu_ticks)
+        data += prep_field(obj)
+
+        data += sets.rowdelim
+    
+    return data
+
+cdef bytes gen_proc_snapshot(object obj):
+    cdef bytes data
+    cdef bytes body
+
+    cdef int body_sz
+    cdef int compressed_sz
+
+    body = compile_event(obj)
+    body_sz = len(body)
+
+    body = compress(body)
+    compressed_sz = len(body)
+
+    data += sets.magic
+    data += sets.genflags(sets.kinds.procs, body_sz, compressed_sz)
+    data += body
+
+    return data
+
+
+### PERF ###
+
+cdef bytes compile_perf(object obj):
+    cdef bytes data
+
+    data += prep_field(obj.ts_s)
+    data += prep_field(obj.ts_ms)
+    data += prep_field(obj.cores)
+    data += prep_field(obj.avg_cpu_pct)
+    data += prep_field(obj.mem_total_kb)
+    data += prep_field(obj.mem_free_kb)
+    data += prep_field(obj.mem_available_kb)
+    data += prep_field(obj.mem_cached_kb)
+    data += prep_field(obj.load_1m)
+    data += prep_field(obj.load_5m)
+    data += prep_field(obj.load_15m)
+    data += prep_field(obj.cores_json)
+
+    return data
+
+cdef bytes gen_perf(object obj):
+    cdef bytes data
+    cdef bytes body
+
+    cdef int body_sz
+    cdef int compressed_sz
+
+    body = compile_perf(obj)
+    body_sz = len(body)
+
+    body = compress(body)
+    compressed_sz = len(body)
+
+    data += sets.magic
+    data += sets.genflags(sets.kinds.perf, body_sz, compressed_sz)

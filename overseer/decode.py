@@ -1,260 +1,161 @@
 """Wire protocol decoding for Over-Seer ingest."""
 
+from dataclass import dataclass
 import os
-import struct
 import zlib
 
+# ─── DATA TYPES ──────────────────────────────────────────────────────────── #
 
-class WireDecoder:
-    WIRE_MAGIC = b"BGW1"
-    WIRE_VERSION = 1
-    WIRE_VERSION_STR = "1.0"
+@dataclass(slots=True)
+class ProtocolData:
 
-    WIRE_KIND_SYSTEM_INFO        = 1
-    WIRE_KIND_EVENT              = 2
-    WIRE_KIND_RICH_PROC_SNAPSHOT = 4
-    WIRE_KIND_SYSTEM_PERF        = 5
-    
-    WIRE_FLAG_CHECKSUM = 0x01
-    WIRE_ALLOWED_FLAGS = WIRE_FLAG_CHECKSUM
-    HEADER_FORMAT = "!4sBBBBII"
+    # frame types
+    frame_sysinfo_flag: int = 0
+    frame_event_flag:   int = 1
+    frame_procs_flag:   int = 2
+    frame_perf_flag:    int = 3
 
-    def __init__(self):
-        try:
-            self.max_frame_bytes = max(
-                256,
-                int(os.environ.get("BERGAMOT_WIRE_MAX_FRAME_BYTES", "1048576")),
-            )
-        except ValueError:
-            self.max_frame_bytes = 1024 * 1024
-        self.header_size = struct.calcsize(self.HEADER_FORMAT)
+    # compression types
+    comp_deflate_flag: int = 0
 
-    @staticmethod
-    def _to_int(val: str, name: str) -> int:
-        try:
-            return int(val)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"invalid integer field {name}: {val!r}") from exc
+    # protocol constants
+    magic: bytes = b"BRGMTWP\x00"
+    mask:  int   = 0xB3484307
 
-    @staticmethod
-    def _to_float(val: str, name: str) -> float:
-        try:
-            return float(val)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"invalid float field {name}: {val!r}") from exc
+_p = ProtocolData()
 
-    @staticmethod
-    def _split_fields(payload: bytes):
-        if not payload:
-            return []
-        text = payload.decode("utf-8", errors="replace")
-        fields = text.split("\x00")
-        if fields and fields[-1] == "":
-            fields.pop()
-        return fields
+@dataclass(slots=True)
+class SystemInfo:
+    hostname: str
+    kernelver: str
+    distro: str
+    ipaddr: str
+    macaddr: str
+    processor: str
+    processor_vend: str
+    ram_gbs: int
 
-    @staticmethod
-    def _next(fields, idx: int, name: str):
-        if idx >= len(fields):
-            raise ValueError(f"missing field {name}")
-        return fields[idx], idx + 1
+@dataclass(slots=True)
+class Event:
+    ts_s: int
+    ts_ms: int
+    pid: int
+    type: str
+    subtype: str
+    arg1: str
+    arg2: str
+    retval: int
 
-    def unpack_header(self, data: bytes):
-        if len(data) < self.header_size:
-            raise ValueError("short frame header")
-        return struct.unpack(self.HEADER_FORMAT, data[:self.header_size])
+@dataclass(slots=True)
+class Proc:
+    pid
+    ppid
+    uid
+    threads
+    cpu_ticks
+    vm_rss_kb
+    comm
 
-    def validate_header(self, magic: bytes, version: int, flags: int, payload_len: int):
-        if magic != self.WIRE_MAGIC:
-            return "bad_magic", "bad magic"
-        if version != self.WIRE_VERSION:
-            return "bad_version", f"unsupported version {version}"
-        if flags & ~self.WIRE_ALLOWED_FLAGS:
-            return "bad_flags", f"unknown flags 0x{flags:x}"
-        if not (flags & self.WIRE_FLAG_CHECKSUM):
-            return "bad_flags", "missing checksum flag"
-        if payload_len > self.max_frame_bytes:
-            return "oversized", f"frame too large ({payload_len})"
-        return None, None
+@dataclass(slots=True)
+class ProcSnapshot:
+    ts_s: int
+    ts_ms: int
+    processes: list[Proc]
 
-    @staticmethod
-    def checksum_matches(payload: bytes, checksum: int):
-        calc_sum = zlib.crc32(payload) & 0xFFFFFFFF
-        return checksum == calc_sum
+@dataclass(slots=True)
+class Perf:
+    ts_s: int
+    ts_ms: int
+    cores: int
+    avg_cpu_pct: float
+    mem_total_kb: int
+    mem_free_kb: int
+    mem_available_kb: int
+    mem_cached_kb: int
+    load_1m: float
+    load_5m: float
+    load_15m: float
+    cores_json: str
 
-    def decode_system_info(self, payload: bytes):
-        fields = self._split_fields(payload)
-        if len(fields) != 8:
-            raise ValueError(f"system_info expects 8 fields, got {len(fields)}")
+@dataclass(slots=True)
+class Flags:
+    protocol_version_major: int
+    protocol_version_minor: int
+    compression_type: int
+    compression_level: int
+    frame_type: int
+    data_size: int
+    compressed_size: int
+    xor_mask: int
+    field_delim: bytes
+    row_delim: bytes
 
-        ram_gbs = self._to_int(fields[7], "ram_gbs")
+def parse_system_info(body: bytes, field_delim: bytes, row_delim: bytes) -> SystemInfo:
+    pass # TODO
 
-        return {
-            "kind": "system_info",
-            "hostname": fields[0],
-            "kernelver": fields[1],
-            "distro": fields[2],
-            "ipaddr": fields[3],
-            "macaddr": fields[4],
-            "processor": fields[5],
-            "processor_vend": fields[6],
-            "ram_gbs": ram_gbs,
-        }
+def parse_event(body: bytes, field_delim: bytes, row_delim: bytes) -> list[Event]:
+    pass # TODO
 
-    def decode_event(self, payload: bytes):
-        fields = self._split_fields(payload)
-        if len(fields) != 11:
-            raise ValueError(f"event expects 11 fields, got {len(fields)}")
+def parse_proc_snapshot(body: bytes, field_delim: bytes, row_delim: bytes) -> ProcSnapshot:
+    pass # TODO
 
-        ts_s = self._to_int(fields[0], "ts_s")
-        ts_ms = self._to_int(fields[1], "ts_ms")
-        pid = self._to_int(fields[2], "pid")
-        ppid = self._to_int(fields[3], "ppid")
-        uid = self._to_int(fields[4], "uid")
-        ev_type = fields[5] or "unknown"
-        retval = self._to_int(fields[6], "retval")
-        subtype = fields[7]
-        comm = fields[8]
-        arg1 = fields[9]
-        arg2 = fields[10]
+def parse_perf(body: bytes, field_delim: bytes, row_delim: bytes) -> Perf:
+    pass # TODO
 
-        out_arg2 = arg2
-        if ev_type == "ptrace" and out_arg2:
-            try:
-                out_arg2 = int(out_arg2)
-            except ValueError:
-                pass
+def parse_flags(flags: bytes) -> Flags:
+    ret = Flags()
 
-        return {
-            "ts_s": int(ts_s),
-            "ts_ms": int(ts_ms),
-            "pid": int(pid),
-            "ppid": int(ppid),
-            "uid": int(uid),
-            "type": ev_type,
-            "subtype": subtype,
-            "comm": comm,
-            "arg": arg1,
-            "arg1": arg1,
-            "arg2": out_arg2,
-            "retval": int(retval),
-        }
+    sect1 = int.from_bytes(flags[0:4])
 
-    def decode_rich_proc_snapshot(self, payload: bytes):
-        fields = self._split_fields(payload)
-        idx = 0
-        ts_s_s, idx = self._next(fields, idx, "ts_s")
-        ts_ms_s, idx = self._next(fields, idx, "ts_ms")
-        count_s, idx = self._next(fields, idx, "count")
+    ret.protocol_version_major = sect1 & 0x0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    ret.protocol_version_minor = sect1 & 0xFFFF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    ret.compression_type       = sect1 & 0xFFFFFFFF00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    ret.compression_level      = sect1 & 0xFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFFFFF
+    ret.frame_type             = sect1 & 0xFFFFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFF
+    ret.data_size              = sect1 & 0xFFFFFFFFFFFFFFFF000000000000FFFFFFFFFFFF
+    ret.compressed_size        = sect1 & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFF000000000000
 
-        ts_s = self._to_int(ts_s_s, "ts_s")
-        ts_ms = self._to_int(ts_ms_s, "ts_ms")
-        count = self._to_int(count_s, "count")
-        if count < 0:
-            raise ValueError("invalid negative process count")
+    ret.xor_mask = int.from_bytes(flags[5:8])
+    ret.field_delim = flags[9]
+    ret.row_delim   = flags[10]
 
-        rows = []
-        for _ in range(count):
-            pid_s, idx = self._next(fields, idx, "pid")
-            ppid_s, idx = self._next(fields, idx, "ppid")
-            uid_s, idx = self._next(fields, idx, "uid")
-            threads_s, idx = self._next(fields, idx, "threads")
-            cpu_ticks_s, idx = self._next(fields, idx, "cpu_ticks")
-            vm_rss_kb_s, idx = self._next(fields, idx, "vm_rss_kb")
-            comm, idx = self._next(fields, idx, "comm")
+    return ret
 
-            rows.append(
-                {
-                    "pid": self._to_int(pid_s, "pid"),
-                    "ppid": self._to_int(ppid_s, "ppid"),
-                    "uid": self._to_int(uid_s, "uid"),
-                    "comm": comm,
-                    "threads": self._to_int(threads_s, "threads"),
-                    "cpu_ticks": self._to_int(cpu_ticks_s, "cpu_ticks"),
-                    "vm_rss_kb": self._to_int(vm_rss_kb_s, "vm_rss_kb"),
-                }
-            )
+def decompress(compression_type: int, compression_level: int, mask: int, b: bytes) -> bytes:
+    ret = b
 
-        if idx != len(fields):
-            raise ValueError("trailing rich snapshot payload fields")
+    for i in ret:
+        i ^= mask
 
-        return {
-            "kind": "rich_proc_snapshot",
-            "ts_s": int(ts_s),
-            "ts_ms": int(ts_ms),
-            "processes": rows,
-        }
+    match compression_type:
+        case _p.comp_deflate_flag:
+            return zlib.decompress(ret)
+        case _: # deflate (there are no others)
+            return zlib.decompress(ret)
 
-    def decode_system_perf(self, payload: bytes):
-        fields = self._split_fields(payload)
-        idx = 0
-        ts_s_s, idx = self._next(fields, idx, "ts_s")
-        ts_ms_s, idx = self._next(fields, idx, "ts_ms")
-        num_cores_s, idx = self._next(fields, idx, "num_cores")
+def parse_frame(frame: bytes) -> SystemInfo | list[Event] | ProcSnapshot | Perf:
 
-        ts_s = self._to_int(ts_s_s, "ts_s")
-        ts_ms = self._to_int(ts_ms_s, "ts_ms")
-        num_cores = self._to_int(num_cores_s, "num_cores")
-        if num_cores < 0:
-            raise ValueError("invalid negative core count")
+    # parsing magic
+    if not bytes.startswith(_p.magic):
+        pass # some sort of "aw HELL nah"
+    bytes.strip(_p.magic)
 
-        cores = []
-        for _ in range(num_cores):
-            vals = []
-            for name in ("user", "nice", "system", "idle", "iowait", "irq", "softirq"):
-                raw, idx = self._next(fields, idx, f"core_{name}")
-                vals.append(self._to_int(raw, f"core_{name}"))
-            cores.append(
-                {
-                    "user": vals[0],
-                    "nice": vals[1],
-                    "system": vals[2],
-                    "idle": vals[3],
-                    "iowait": vals[4],
-                    "irq": vals[5],
-                    "softirq": vals[6],
-                }
-            )
+    # parsing flags (11 bytes)
+    flags = parse_flags(frame[0:10])
 
-        mem_total_s, idx = self._next(fields, idx, "mem_total_kb")
-        mem_free_s, idx = self._next(fields, idx, "mem_free_kb")
-        mem_available_s, idx = self._next(fields, idx, "mem_available_kb")
-        mem_cached_s, idx = self._next(fields, idx, "mem_cached_kb")
-        l1_s, idx = self._next(fields, idx, "load_1m")
-        l5_s, idx = self._next(fields, idx, "load_5m")
-        l15_s, idx = self._next(fields, idx, "load_15m")
+    body = decompress(
+        flags.compression_type,
+        flags.compression_level,
+        flags.mask,
+        frame[11:]
+    )
 
-        if idx != len(fields):
-            raise ValueError("trailing system_perf payload fields")
-
-        return {
-            "kind": "system_perf",
-            "ts_s": int(ts_s),
-            "ts_ms": int(ts_ms),
-            "cores": cores,
-            "mem": {
-                "total_kb": self._to_int(mem_total_s, "mem_total_kb"),
-                "free_kb": self._to_int(mem_free_s, "mem_free_kb"),
-                "available_kb": self._to_int(mem_available_s, "mem_available_kb"),
-                "cached_kb": self._to_int(mem_cached_s, "mem_cached_kb"),
-            },
-            "load": {
-                "l1": round(self._to_float(l1_s, "load_1m"), 2),
-                "l5": round(self._to_float(l5_s, "load_5m"), 2),
-                "l15": round(self._to_float(l15_s, "load_15m"), 2),
-            },
-        }
-
-    def decode_payload(self, kind: int, payload: bytes):
-        if kind == self.WIRE_KIND_SYSTEM_INFO:
-            return self.decode_system_info(payload)
-        if kind == self.WIRE_KIND_EVENT:
-            return self.decode_event(payload)
-        if kind == self.WIRE_KIND_RICH_PROC_SNAPSHOT:
-            return self.decode_rich_proc_snapshot(payload)
-        if kind == self.WIRE_KIND_SYSTEM_PERF:
-            return self.decode_system_perf(payload)
-        return None
-
-
-wd = WireDecoder()
+    match flags.frame_type:
+        case _p.frame_sysinfo_flag:
+            return parse_system_info(body, flags.field_delim, flags.row_delim)
+        case _p.frame_event_flag:
+            return parse_event(body, flags.field_delim, flags.row_delim)
+        case _p.procs_flag:
+            return parse_proc_snapshot(body, flags.field_delim, flags.row_delim)
+        case _p.perf:
+            return parse_perf(body, flags.field_delim, flags.row_delim)
