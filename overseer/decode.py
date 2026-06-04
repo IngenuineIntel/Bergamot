@@ -48,13 +48,13 @@ class Event:
 
 @dataclass(slots=True)
 class Proc:
-    pid
-    ppid
-    uid
-    threads
-    cpu_ticks
-    vm_rss_kb
-    comm
+    pid: int
+    ppid: int
+    uid: int
+    threads: int
+    cpu_ticks: int
+    vm_rss_kb: int
+    comm: str
 
 @dataclass(slots=True)
 class ProcSnapshot:
@@ -90,17 +90,118 @@ class Flags:
     field_delim: bytes
     row_delim: bytes
 
+class FrameProcessingError(Exception):
+    """A frame was malformed. Just catch."""
+
+
+def _getf(f: bytes, desire: type) -> str | int | float:
+    if desire is str:
+        return bytes.decode("utf-8")
+    elif desire is int:
+        try:
+            return int(bytes)
+        except ValueError:
+            raise FrameProcessingError(f"Garbage integer {bytes}")
+    elif desire is float:
+        try:
+            return float(bytes)
+        except ValueError:
+            raise FrameProcessingError(f"Garbage float {bytes}")
+
 def parse_system_info(body: bytes, field_delim: bytes, row_delim: bytes) -> SystemInfo:
-    pass # TODO
+    ret = SystemInfo()
+    data = body.split(field_delim)
+    try:
+        ret.hostname       = _getf(data[0], str)
+        ret.kernelver      = _getf(data[1], str)
+        ret.distro         = _getf(data[2], str)
+        ret.ipaddr         = _getf(data[3], str)
+        ret.macaddr        = _getf(data[4], str)
+        ret.processor      = _getf(data[5], str)
+        ret.processor_vend = _getf(data[6], str)
+        ret.ram_gbs        = _getf(data[7], int)
+
+    # replace default errors with custom ones for handling
+    except IndexError as e:
+        raise FrameProcessingError(f"Insufficient number of fields @ {len(data)}") from e
+
+    return ret
 
 def parse_event(body: bytes, field_delim: bytes, row_delim: bytes) -> list[Event]:
-    pass # TODO
+    ret = []
+    data = body.split(row_delim)
+    try:
+        for row in data:
+           d = row.split(field_delim)
+           e = Event()
+
+            e.ts_s    = _getf(d[0], int)
+            e.ts_ms   = _getf(d[1], int)
+            e.pid     = _getf(d[2], int)
+            e.type    = _getf(d[3], str)
+            e.subtype = _getf(d[4], str)
+            e.arg1    = _getf(d[5], str)
+            e.arg2    = _getf(d[6], str)
+            e.retval  = _getf(d[7], int)
+
+            ret.append(e)
+    
+    except IndexError as e:
+        raise FrameProcessingError(f"Insufficient number of fields in event") from e
+
+    return ret
 
 def parse_proc_snapshot(body: bytes, field_delim: bytes, row_delim: bytes) -> ProcSnapshot:
-    pass # TODO
+    ret = ProcSnapshot()
+    data = body.split(row_delim)
+
+    try:
+        at1 = True
+        for row in data:
+            if at1:
+                at1 = False
+                ret.ts_s  = _getf(row[0], int)
+                ret.ts_ms = _getf(row[1], int)
+                continue
+            # else:
+        
+            p = Proc()
+            p.pid       = _getf(row[0], int)
+            p.ppid      = _getf(row[1], int)
+            p.uid       = _getf(row[2], int)
+            p.threads   = _getf(row[3], int)
+            p.cpu_ticks = _getf(row[4], int)
+            p.vm_rss_kb = _getf(row[5], int)
+            p.comm      = row[6].decode("utf-8")
+
+            ret.processes.append(p)
+        
+    except IndexError as e:
+        raise FrameProcessingError("Insufficient number of fields in proc") from e
+
+    return ret
+
 
 def parse_perf(body: bytes, field_delim: bytes, row_delim: bytes) -> Perf:
-    pass # TODO
+    ret = Perf()
+    data = body.split(field_delim)
+
+    try:
+        ret.ts_s             = _getf(row[0], int)
+        ret.ts_ms            = _getf(row[1], int)
+        ret.cores            = _getf(row[2], int)
+        ret.avg_cpu_pct      = _getf(row[3], float)
+        ret.mem_total_kb     = _getf(row[4], int)
+        ret.mem_free_kb      = _getf(row[5], int)
+        ret.mem_available_kb = _getf(row[6], int)
+        ret.mem_cached_kb    = _getf(row[7], int)
+        ret.load_1m          = _getf(row[8], float)
+        ret.load_5m          = _getf(row[9], float)
+        ret.load_15m         = _getf(row[10], float)
+        ret.cores_json       = _getf(row[11], str)
+
+    except IndexError as e:
+        raise FrameProcessingError("Insufficient number of fields in perf") from e
 
 def parse_flags(flags: bytes) -> Flags:
     ret = Flags()
@@ -108,12 +209,12 @@ def parse_flags(flags: bytes) -> Flags:
     sect1 = int.from_bytes(flags[0:4])
 
     ret.protocol_version_major = sect1 & 0x0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    ret.protocol_version_minor = sect1 & 0xFFFF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    ret.compression_type       = sect1 & 0xFFFFFFFF00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    ret.compression_level      = sect1 & 0xFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFFFFF
-    ret.frame_type             = sect1 & 0xFFFFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFF
-    ret.data_size              = sect1 & 0xFFFFFFFFFFFFFFFF000000000000FFFFFFFFFFFF
-    ret.compressed_size        = sect1 & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFF000000000000
+    ret.protocol_version_minor = sect1 & 0xFFFF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF >> 4
+    ret.compression_type       = sect1 & 0xFFFFFFFF00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF >> 8
+    ret.compression_level      = sect1 & 0xFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFFFFF >> 10
+    ret.frame_type             = sect1 & 0xFFFFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFF >> 13
+    ret.data_size              = sect1 & 0xFFFFFFFFFFFFFFFF000000000000FFFFFFFFFFFF >> 16
+    ret.compressed_size        = sect1 & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFF000000000000 >> 28
 
     ret.xor_mask = int.from_bytes(flags[5:8])
     ret.field_delim = flags[9]
@@ -137,11 +238,19 @@ def parse_frame(frame: bytes) -> SystemInfo | list[Event] | ProcSnapshot | Perf:
 
     # parsing magic
     if not bytes.startswith(_p.magic):
-        pass # some sort of "aw HELL nah"
+        raise FrameProcessingError(
+            f"Frame didn't have magic, or magic was a garbage (expected {_p.magic})"
+        )
     bytes.strip(_p.magic)
 
     # parsing flags (11 bytes)
     flags = parse_flags(frame[0:10])
+
+    # size check #1
+    if len(body) != flags.compressed_size:
+        raise FrameProcessingError(
+            f"Header claims compressed data is {flags.compressed_size} bytes, but it's really {len(body)} bytes."
+        )
 
     body = decompress(
         flags.compression_type,
@@ -149,6 +258,12 @@ def parse_frame(frame: bytes) -> SystemInfo | list[Event] | ProcSnapshot | Perf:
         flags.mask,
         frame[11:]
     )
+
+    # size check #2
+    if len(body) != flags.data_size:
+        raise FrameProcessingError(
+            f"Header claims decompressed data is {flags.data_size} bytes, but it's really {len(body)} bytes."
+        )
 
     match flags.frame_type:
         case _p.frame_sysinfo_flag:

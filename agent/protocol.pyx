@@ -148,15 +148,15 @@ cdef class ProtocolSettings:
 
         ### preparing ###
         
-        # +/- is higher in the order of operations than <</>>
+        # + is higher in the order of operations than <<
         ret = (
-            cls.version_major - 1
-            + (cls.version_minr << 4)
-            + (compression_flag << 8)
-            + (cls.compression_lvl - 1 << 10)
-            + (king << 13)
-            + (data_len -1 << 16)
-            + (compressed_len -1 << 28)
+            cls.version_major -1
+            + (cls.version_minr       << 4)
+            + (compression_flag       << 8)
+            + (cls.compression_lvl -1 << 10)
+            + (king                   << 13)
+            + (data_len            -1 << 16)
+            + (compressed_len      -1 << 28)
         )
 
         return ret.to_bytes(5) + cls.mask.to_bytes(4) + cls.delim + cls.rowdelim
@@ -203,7 +203,7 @@ cdef class Proc:
     cdef int threads
     cdef int cpu_ticks
     cdef int vm_rss_kb
-    cdef int comm
+    cdef str comm
 
 @dataclass(slots=True)
 cdef class Perf:
@@ -236,6 +236,12 @@ cdef bytes compress(bytes b):
     return ret
 
 cdef bytes prep_field(object s):
+    # protecting against empty fields
+    # failure to do this will make the Overseer drop the packet over an empty
+    # field
+    if s is None or s == "":
+        s = " "
+
     if type(s) is str:
         return s.encode("utf-8", errors="replace")
             .replace(sets.delim,    b" ")
@@ -248,20 +254,17 @@ cdef bytes prep_field(object s):
 
 ### SYSTEM_INFO ###
 
-cdef bytes compile_system_info(list objs):
+cdef bytes compile_system_info(obj):
     cdef bytes data
     
-    for obj in objs:
-        data += prep_field(obj.hostname)
-        data += prep_field(obj.kernelver)
-        data += prep_field(obj.distro)
-        data += prep_field(obj.ipaddr)
-        data += prep_field(obj.macaddr)
-        data += prep_field(obj.processor)
-        data += prep_field(obj.processor_vend)
-        data += prep_field(obj.ram_gbs)
-
-        data += sets.rowdelim
+    data += prep_field(obj.hostname)
+    data += prep_field(obj.kernelver)
+    data += prep_field(obj.distro)
+    data += prep_field(obj.ipaddr)
+    data += prep_field(obj.macaddr)
+    data += prep_field(obj.processor)
+    data += prep_field(obj.processor_vend)
+    data += prep_field(obj.ram_gbs)
 
     return data
 
