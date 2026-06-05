@@ -208,13 +208,13 @@ def parse_flags(flags: bytes) -> Flags:
 
     sect1 = int.from_bytes(flags[0:4])
 
-    ret.protocol_version_major = sect1 & 0x0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-    ret.protocol_version_minor = sect1 & 0xFFFF0000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF >> 4
-    ret.compression_type       = sect1 & 0xFFFFFFFF00FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF >> 8
-    ret.compression_level      = sect1 & 0xFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFFFFF >> 10
-    ret.frame_type             = sect1 & 0xFFFFFFFFFFFFF000FFFFFFFFFFFFFFFFFFFFFFFF >> 13
-    ret.data_size              = sect1 & 0xFFFFFFFFFFFFFFFF000000000000FFFFFFFFFFFF >> 16
-    ret.compressed_size        = sect1 & 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFF000000000000 >> 28
+    ret.protocol_version_major = (sect1 & 0x000000000000000000000000000000000000FFFF) + 1
+    ret.protocol_version_minor = (sect1 & 0x00000000000000000000000000000000FFFF0000 >> 4)
+    ret.compression_type       = (sect1 & 0x000000000000000000000000000000FF00000000 >> 8)
+    ret.compression_level      = (sect1 & 0x000000000000000000000000000FFF0000000000 >> 10) + 1
+    ret.frame_type             = (sect1 & 0x000000000000000000000000FFF0000000000000 >> 13)
+    ret.data_size              = (sect1 & 0x000000000000FFFFFFFFFFFF0000000000000000 >> 16) + 1
+    ret.compressed_size        = (sect1 & 0xFFFFFFFFFFFF0000000000000000000000000000 >> 28) + 1
 
     ret.xor_mask = int.from_bytes(flags[5:8])
     ret.field_delim = flags[9]

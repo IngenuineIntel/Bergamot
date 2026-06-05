@@ -4,6 +4,8 @@
 import platform
 import socket
 
+from protocol import SystemInfo
+
 def read_os_release() -> str:
     pretty_name = ""
     name = ""
@@ -100,19 +102,17 @@ def read_ram_gbs() -> int:
         return 0
     return 0
 
-def collect_system_info() -> dict:
+def collect_system_info() -> SystemInfo:
     uname = platform.uname()
-    primary_iface = get_primary_interface()
-    processor, processor_vend = read_cpu_info()
-    return {
-        "kind": "system_info",
-        "hostname": socket.gethostname(),
-        "kernelver": " ".join(part for part in (uname.release, uname.machine) if part).strip(),
-        "distro": read_os_release(),
-        "ipaddr": get_primary_ipv4(),
-        "macaddr": get_mac_address(primary_iface),
-        "processor": processor,
-        "processor_vend": processor_vend,
-        "ram_gbs": read_ram_gbs(),
-    }
 
+    ret = SystemInfo()
+    
+    ret.hostname  = socket.gethostname()
+    ret.kernelver = "".join(part for part in (uname.release, uname.machine) if part).strip()
+    ret.distro    = read_os_release()
+    ret.ipaddr    = get_primary_ipv4()
+    ret.macaddr   = get_mac_address(get_primary_interface())
+    ret.processor, ret.processor_vend = read_cpu_info()
+    ret.ram_gbs   = read_ram_gbs()
+
+    return ret

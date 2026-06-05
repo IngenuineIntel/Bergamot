@@ -1,145 +1,159 @@
 # net.pyx
 
-from interface import l
-from procurement import collect_system_info
-import protocol
+import contextlib
 import socket
 import time
+from threading import RLock
 
-# ── TCP sender with reconnect back-off ───────────────────────────────────── #
+from interface import l
+from protocol import (
+    SystemInfo, gen_system_info,
+    Event, gen_event,
+    ProcSnapshot, gen_proc_snapshot,
+    Perf, gen_perf
+)
+
+# inter-method retval management is done via True/False|0/1
+# extra-method retval management is done via arg/None, allowing for code like:
+
+#if obj is sender_object.method(obj):
+#   # success
+#else:
+##not success 
+
+# or, alternatively, when the above is not applicable, True/False, allowing:
+
+#if not sender_object.method(obj):
+#   # lack of succes
+#else:
+#   # lack of lack of success
+
+# because of the lack of explicit communication about functionality that
+# occures with this method, logs go directly to stdout via `l`.
 
 cdef class Sender:
-    cdef str _host
-    cdef int _port
-    cdef object _sock
-    cdef double _backoff
-    cdef dict _system_info
-    cdef int reconnect_max_seconds
-    cdef int max_frame_bytes
-    cdef int sock_timeout_secs
+    cdef str __host
+    cdef int __port
+    cdef object __sock
+    cdef object __l
+    cdef int __reconnect_max_seconds
+    cdef int __max_frame_sz
+    cdef int __socket_timeout
 
-    cdef bint _backoff_wait(self, double delay_seconds, object stop_event):
-        cdef double deadline
-        cdef double remaining
-        if delay_seconds <= 0:
-            return True
+    """
+    Manages all network communication done by this program.
+    Thread safe via RLocks.
+    """
 
-        if stop_event is None:
-            time.sleep(delay_seconds)
-            return True
+    def __init__(self, str host, int port, int reconnect_max=30,
+                 int max_frame_sz=1024*1024, int socket_timeout=5):
+        # Quick!
+        self.__l = RLock() # the door!
 
-        deadline = time.monotonic() + delay_seconds
-        while True:
-            if stop_event.is_set():
-                return False
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return True
-            if stop_event.wait(min(0.2, remaining)):
-                return False
+        self.__host = host
+        self.__port = port
+        
+        self.__reconnect_max_seconds = reconnect_max
+        self.__max_frame_sz = max_frame_sz
+        self.__socket_timeout = max(1, socket_timeout)
 
-    def __init__(self, str host, int port, int reconnect_max_seconds=30,
-                 int max_frame_bytes=1_048_000, int sock_timeout_secs=5):
-        self._host = host
-        self._port = port
-        self.reconnect_max_seconds = reconnect_max_seconds
-        self.max_frame_bytes = max_frame_bytes
-        self.sock_timeout_secs = max(1, sock_timeout_secs)
-        self._sock = None
-        self._backoff = 1.0
-        self._system_info = collect_system_info()
+        self.__sock = None
+        self.connect()
 
-    cdef bint _connect(self, object stop_event=None):
-        cdef object s
+        # how backoffs (the time between retries in the event of a failed connection)
+        # are are calculated. It is called iteratively.
+
+    # getters & setters because we can't keep the front door unlocked
+
+    # max_frame_sz
+    @property
+    def max_frame_sz(self):
+        with self.__l:
+            return self.__max_frame_sz
+
+    @max_frame_sz.setter
+    def max_frame_sz(self, value):
+        with self.__l:
+            self.__max_frame_sz = value
+
+    # socket_timeout
+    @property
+    def socket_timeout(self):
+        with self.__l:
+            return self.__socket_timeout
+    
+    @socket_timeout.setter
+    def socket_timeout(self, value):
+        with self.__l:
+            self.__socket_timeout = value
+
+
+    # internal functions for connecting/disconnecting/sending
+    cdef bool __connect(self):
+        """Attempts connection, True/False on Success/Failure"""
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(self.sock_timeout_secs)
-            s.connect((self._host, self._port))
-            s.settimeout(None)
-            self._sock = s
-            self._backoff = 1.0
-            if not self._send_objects([self._system_info]):
-                self._close()
-                l.critical("failed to send system_info handshake", flush=True)
-                l.info(f"retrying in {self._backoff:.0f}s", flush=True)
-                if not self._backoff_wait(self._backoff, stop_event):
-                    return False
-                self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
-                return False
-            l.info(f"connected to {self._host}:{self._port}", flush=True)
-            return True
-        except OSError as exc:
-            l.error(f"connect failed: {exc}", flush=True)
-            l.info(f"retrying in {self._backoff:.0f}s", flush=True)
-            if not self._backoff_wait(self._backoff, stop_event):
-                return False
-            self._backoff = min(self._backoff * 2, self.reconnect_max_seconds)
+            self.__sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            self.__sock.settimeout(self.__socket_timeout)
+            self.__sock.connect((self.__host, self.__port))
+            self.__sock.settimeout(None)
+
+        except OSError as e:
             return False
+        return True
 
-    cpdef bint connect(self, object stop_event=None):
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                return False
-            if self._connect(stop_event):
-                return True
+    def __close(self):
+        """Attempts disconnection, can't fail."""
+        with contextlib.suppress(OSError):
+            self.__sock.close()
 
-    cpdef bint send_batch(self, list events):
-        """
-        Encode and send a batch of events.  Returns False if the connection
-        was lost; caller should reconnect and retry.
-        """
-        if not events:
-            return True
+    cdef bool __send(self, object data):
+        cdef bytes frame
 
-        return self._send_objects(events)
-
-    cdef bint _send_objects(self, list payloads):
-        cdef str payload
-        cdef bytes data
-        cdef object obj
-        cdef bytes bin_payload
-        cdef int kind
-        cdef list frames
-        cdef int dropped_frames = 0
-        if self._sock is None:
+        if isinstance(data, SystemInfo):
+            frame = gen_system_info(data)
+        elif isinstance(data, Event):
+            frame = gen_event([data])
+        elif isinstance(data, ProcSnapshot):
+            frame = gen_proc_snapshot(data)
+        elif isinstance(data, Perf):
+            frame = gen_perf(data)
+        else:
             return False
-
-        frames = []
-        for obj in payloads:
-            if not isinstance(obj, dict):
-                continue
-
-            kind, bin_payload = protocol.encode_wire_payload(obj)
-
-            if len(bin_payload) > self.max_frame_bytes:
-                dropped_frames += 1
-                continue
-
-            frames.append(protocol.encode_frame(kind, bin_payload))
-
-        if dropped_frames:
-            l.warning(f"dropped {dropped_frames} oversized frame(s)")
-
-        if not frames:
-            return True
-
-        data = b"".join(frames)
 
         try:
-            self._sock.sendall(data)
+            self.__sock.sendall(frame)
             return True
-        except OSError as exc:
-            l.error(f"send error: {exc}", flush=True)
-            self._close()
+        except OSError as e:
+            l.error(f"Send error: {e}", flush=True)
             return False
 
-    cpdef void close(self):
-        self._close()
+    # wrapprs
+    cdef bool connect(self):
+        """Attempts connection in saecula saeculorum"""
+        cdef int backoff = 1
+        cdef int inter_backoff
 
-    cdef void _close(self):
-        if self._sock:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-            self._sock = None
+        backoff_calc = lambda x, y: min(x*2, y) if x < y else y
+
+        with self.__l:
+            while True:
+                if self.__connect():
+                    return True
+                l.critical(f"Connection failed, retrying in {backoff}s...")
+                time.sleep(backoff)
+                backoff = backoff_calc(backoff, self.__reconnect_max_seconds)
+
+    def close(self):
+        """Attempts disconnection, deletes `self`, can't fail."""
+        if self.__sock:
+            with self.__l:
+                self.__close()
+        del self
+
+    cpdef bool send(self, object data):
+        """Creates frame from `data` and sends it, True/False on success."""
+        if not self.__sock:
+            return False
+        with self.__l:
+            return self.__send(data)

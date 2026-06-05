@@ -47,8 +47,8 @@ EVENT_QUEUE_MAX_BYTES = _cmdline.event_queue_max * 1024 * 1024
 PROC_QUEUE_MAX_BYTES  = _cmdline.proc_queue_max  * 1024 * 1024
 PERF_QUEUE_MAX_BYTES  = _cmdline.perf_queue_max  * 1024 * 1024
 
-MAX_FRAME_BYTES = 1024 * 1024
-RECONNECT_MAX_SECONDS = _cmdline.reconnect_timeout
+MAX_FRAME_BYTES        = 1024 * 1024
+RECONNECT_MAX_SECONDS  = _cmdline.reconnect_timeout
 SOCKET_TIMEOUT_SECONDS = 5
 
 # ── GLOBALS ──────────────────────────────────────────────────────────────── #
@@ -193,28 +193,24 @@ cdef object parse_line(str line):
 
         retval_value = int(retval_raw)
 
-        return {
-            "ts_s": int(ts_s),
-            "ts_ms": int(rem_ns // 1_000_000),
-            "pid": int(pid_raw),
-            "ppid": int(ppid_raw),
-            "uid": int(uid_raw),
-            "type": type_raw,
-            "subtype": subtype_raw,
-            "comm": comm,
-            "arg": arg1,
-            "arg1": arg1,
-            "arg2": arg2_value,
-            "retval": retval_value,
-        }
+        return protocol.Event(
+            int(ts_s),
+            int(rem_ns // 1_000_000),
+            int(pid_raw),
+            type_raw,
+            subtype_raw,
+            arg1,
+            str(arg2_value),
+            retval_value,
+        )
     except ValueError:
         return None
 
-cdef dict collect_process_snapshot():
+cdef object collect_process_snapshot():
     now = time.time()
     ts_s = int(now)
     ts_ms = int((now - ts_s) * 1000)
-    processes: list[dict] = []
+    processes = []
     cdef int found
     cdef bint got_name
     cdef bint got_ppid
@@ -283,28 +279,25 @@ cdef dict collect_process_snapshot():
                     OSError, ValueError, IndexError):
                 cpu_ticks = 0
 
-            processes.append({
-                "pid": pid,
-                "ppid": ppid,
-                "uid": uid,
-                "comm": comm,
-                "threads": threads,
-                "vm_rss_kb": vm_rss_kb,
-                "cpu_ticks": cpu_ticks,
-            })
+            processes.append(
+                protocol.Proc(
+                    pid,
+                    ppid,
+                    uid,
+                    threads,
+                    cpu_ticks,
+                    vm_rss_kb,
+                    comm,
+                )
+            )
         except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError):
             # Process exited (or became unreadable) while being sampled.
             continue
 
-    return {
-        "kind": "rich_proc_snapshot",
-        "ts_s": ts_s,
-        "ts_ms": ts_ms,
-        "processes": processes,
-    }
+    return protocol.ProcSnapshot(ts_s, ts_ms, processes)
 
 
-def collect_system_perf() -> dict:
+def collect_system_perf() -> object:
     """Collect system-wide CPU, RAM, and load-average data from /proc."""
     now = time.time()
     ts_s = int(now)
@@ -357,14 +350,20 @@ def collect_system_perf() -> dict:
     except OSError:
         pass
 
-    return {
-        "kind": "system_perf",
-        "ts_s": ts_s,
-        "ts_ms": ts_ms,
-        "cores": cores,
-        "mem": mem,
-        "load": load,
-    }
+    return protocol.Perf(
+        ts_s,
+        ts_ms,
+        len(cores),
+        0.0,
+        mem[0],
+        mem[1],
+        mem[2],
+        mem[3],
+        load[0],
+        load[1],
+        load[2],
+        str(cores),
+    )
 
 
 def collect_all_snapshots() -> list:
@@ -432,7 +431,7 @@ def main():
             TARGET_HOST, TARGET_PORT, RECONNECT_MAX_SECONDS, MAX_FRAME_BYTES,
             SOCKET_TIMEOUT_SECONDS
         )
-        if not sender.connect(stop_event):
+        if not sender.connect():
             return
 
         poll_interval = 1 / EVENT_HZ

@@ -1,4 +1,4 @@
-# logging.pyx
+# interface.pyx
 """
 I have written similar code to this like a dozen times,
 so I decided to put it in a gist in order to save my

@@ -1,4 +1,8 @@
-Cython>=3.2.0
-setuptools>=82.0.0
-cx_Freeze>=7.2.0
-pyinstaller>=6.12.0
+cx_Freeze>=8.6.4
+Cython>=3.2.5
+dataclasses>=0.6
+filelock>=3.29.1
+freeze-core>=0.6.1
+packaging>=26.2
+patchelf>=0.17.2.4
+setuptools>=82.0.1

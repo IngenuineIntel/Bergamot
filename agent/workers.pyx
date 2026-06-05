@@ -5,6 +5,7 @@ import sys
 import time
 
 from interface import l
+from protocol import SystemInfo, Event, ProcSnapshot, Perf
 
 def event_reader_run(event_queue, stop_event, poll_interval, proc_path,
                      wire_batch_max_bytes, size_bytes_cb, parse_line_cb,
@@ -103,6 +104,17 @@ def snapshot_worker_run(snapshot_queue, stop_event, snapshot_interval,
 
 
 def sender_run(sender, event_queue, snapshot_queue, stop_event):
+    allowed_types = (SystemInfo, Event, ProcSnapshot, Perf)
+
+    def _sender_send_all(obj, items):
+        for item in items:
+            if not isinstance(item, allowed_types):
+                l.warning(f"dropping outbound item with unsupported type: {type(item).__name__}", flush=True)
+                continue
+            if not obj.send(item):
+                return False
+        return True
+
     while not stop_event.is_set():
         outbound = []
 
@@ -133,7 +145,7 @@ def sender_run(sender, event_queue, snapshot_queue, stop_event):
             outbound.extend(snapshots)
 
         if outbound:
-            if not sender.send_batch(outbound):
-                if not sender.connect(stop_event):
+            if not _sender_send_all(sender, outbound):
+                if not sender.connect():
                     continue
-                sender.send_batch(outbound)
+                _sender_send_all(sender, outbound)
