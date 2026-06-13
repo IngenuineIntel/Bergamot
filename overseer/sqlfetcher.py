@@ -1,5 +1,4 @@
-"""Shared SQL script loader for Over-Seer managers."""
-# TODO I NEED COMMENTS
+"""Shared SQL script loader for Overseer managers."""
 
 import contextlib
 import os
@@ -8,10 +7,17 @@ from threading import RLock
 class SQLManagementError(Exception):
     """
     If you've just seen this exception, it's either your fault, or the fault
-    of this programs packaging.
+    of this programs packaging. This shouldn't be caught.
     """
 
 class SQLManager:
+    """
+    Developer interface for all SQL scripts pertaining to this program.
+    """
+    
+    #### HOW IT WORKS ####
+
+    # SQL scripts are stored in the below dictionary:
     __ALIASES = {
         # data inputs
         "initdb":     "in/initdb.sql",
@@ -19,7 +25,7 @@ class SQLManager:
         "entryproc":  "in/entryproc.sql",
         "entryperf":  "in/entryperf.sql",
 
-        # data outputs (past)
+        # data outputs
         "getmeta":          "out/getmeta_past.sql",
         "getcpu":           "out/getcpu_past.sql",
         "geteps":           "out/geteps_past.sql",
@@ -29,19 +35,21 @@ class SQLManager:
         "getoverview":      "out/getoverview_past.sql",
         "geteventsbytype":  "out/geteventsbytype.sql",
         "geteventsbypid":   "out/geteventsbypid.sql"
-    
-        # data outputs (live)
-        "getcpu_live":           "out/getcpu_live.sql",
-        "geteps_live":           "out/geteps_live.sql",
-        "getprocsoverview_live": "out/getprocsoverview_live.sql"
     }
+    # with values being the SQL scripts' paths. Upon initialization, this dict
+    # is copied and the paths are replaced with the content of the files at the
+    # paths. __getattr__ is hooked so that instead of referencing actual
+    # attributes, you access the new dictionary, which is also the __dict__
+    # value of the object. This object is thread protected, and so there is
+    # only a need for a single, global instance, which is defined at the bottom
+    # the of file.
 
     def __init__(self, sqldir="sql"):
 
         # dict() to create a copy, not a reference
         self.__internal_aliases = dict(self.__ALIASES)
         
-        self.__getattr_rlock = RLock()
+        self.__l = RLock()
 
         path = ""
         for key in self.__internal_aliases:
@@ -54,7 +62,7 @@ class SQLManager:
             except FileNotFoundError as e:
                 raise SQLManagementError(e)
 
-    def __sub_getattr__(self, key):
+    def __sub_getattr(self, key):
         ret = None
 
         with contextlib.suppress(KeyError):
@@ -69,8 +77,8 @@ class SQLManager:
         return ret
 
     def __getattr__(self, key):
-        with self.__getattr_rlock():
-            return __sub_getattr__(key)
+        with self.__l():
+            return __sub_getattr(key)
 
     def __setattr__(self, name, value):
         raise SQLManagementError(f"'{type(self)} is read-only.")
@@ -80,7 +88,9 @@ class SQLManager:
         for i in cls.__ALIASES:
             print(f"{i}\t\t{cls.__ALIASES[i]}")
 
+    @property
     def __dict__(self):
-        return self.__internal_aliases
+        with self.__l():
+            return self.__internal_aliases
 
 sql = SQLManager()

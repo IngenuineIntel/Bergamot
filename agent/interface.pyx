@@ -10,56 +10,128 @@ import sys
 from typing import NamedTuple
 
 cdef class Logger:
-    cdef readonly object stream
-    cdef readonly str blue
-    cdef readonly str cyan
-    cdef readonly str green
-    cdef readonly str red
-    cdef readonly str yellow
-    cdef readonly str reset
+
+    """
+    Universal logging
+
+    [21:01:01:355314][INTERNAL]: This is an extremely verbose log, like a thread exiting
+    [21:01:01][DEBUG]    : This is a simple debug, like the most likely reason for a problem
+    [21:01:01][INFO]     : Something happened successfully.
+    [21:01:01][WARNING]  : Minor mishap, non-fatal
+    [21:01:01][CRITICAL] : Major mishap, likely fatal
+    [21:01:01][ERROR]    : The error that indicates the mishap
+
+    out_stream: the stream to print to, defaults to stdout (if not stdout, all colors are omitted)
+    """
+
+    cdef object stream
+
+    cdef str _blue
+    cdef str _cyan
+    cdef str _green
+    cdef str _red
+    cdef str _yellow
+    cdef str _reset
+
+    cdef int __verbosity_lvl
 
     def __init__(self, out_stream=sys.stdout):
+
         self.stream = out_stream
 
-        self.blue   = "\033[34m"
-        self.cyan   = "\033[36m"
-        self.green  = "\033[32m"
-        self.red    = "\033[31m"
-        self.yellow = "\033[33m"
-        self.reset  = "\033[39m"
+        # colors!
+        if out_stream is sys.stdout:
+            self._blue   = "\033[34m"
+            self._cyan   = "\033[36m"
+            self._green  = "\033[32m"
+            self._red    = "\033[31m"
+            self._yellow = "\033[33m"
+            self._reset  = "\033[39m"
+
+        # pre-configured verbosity level (max verbosity) before it's configured
+        # via `<Logger>.verbosity()`
+        self.__verbosity_lvl = 2
 
     def __get_time(self) -> str:
         now = datetime.now()
         return now.strftime("%H:%M:%S")
 
     def __get_time_field(self) -> str:
-        return "[%s%s%s]" % (self.blue, self.__get_time(), self.reset)
+        return "[%s%s%s]" % (self._blue, self.__get_time(), self._reset)
+
+    def __get_internal_time(self) -> str:
+        now = datetime.now()
+        return now.strftime("%H:%M:%S:%f")
+
+    def verbosity(self, level):
+        """
+        level=0 - minimum verbosity (no DEBUGs or INTERNALs)
+        level=1 - medium verbosity (no INTERNALs)
+        level=2 - maximum verbosity (DEBUGs and INTERNALs)
+        """
+        self.__verbosity_lvl = level
+
+    def internal(self, msg):
+        """
+        [21:01:01:355314][INTERNAL]: `msg`
+        """
+        if self.__verbosity_lvl >= 2:
+            print("%s[%s][INTERNAL]: %s%s" % (
+                self._green, self.__get_internal_time(), msg, self._reset
+            ), file=self.stream)
 
     def debug(self, msg, flush=False):
-        print("%s[%sDEBUG%s]    : %s" % (
-            self.__get_time_field(), self.cyan, self.reset, msg
-        ), file=self.stream, flush=flush)
+        """
+        [21:01:01][DEBUG]    : `msg`
+
+        flush=True - flushes buffer
+        """
+        if self.__verbosity_lvl >= 1:
+            print("%s[%sDEBUG%s]    : %s" % (
+                self.__get_time_field(), self._cyan, self._reset, msg
+            ), file=self.stream, flush=flush)
 
     def info(self, msg, flush=False):
+        """
+        [21:01:01][INFO]     : `msg`
+
+        flush=True - flushes buffer
+        """
         print("%s[%sINFO%s]     : %s" % (
-            self.__get_time_field(), self.green, self.reset, msg
+            self.__get_time_field(), self._green, self._reset, msg
         ), file=self.stream, flush=flush)
 
     def warning(self, msg, flush=False):
+        """
+        [21:01:01][WARNING]  : `msg`
+
+        flush=True - flushes buffer
+        """
         print("%s[%sWARNING%s]  : %s" % (
-            self.__get_time_field(), self.yellow, self.reset, msg
+            self.__get_time_field(), self._yellow, self._reset, msg
         ), file=self.stream, flush=flush)
     
     def critical(self, msg, flush=False, *, exitcode=None):
+        """
+        [21:01:01][CRITICAL] : `msg`
+
+        flush=<bool> - True flushes buffer, default is False
+        exitcode=<int>|<None> - exits with value if not None, default is None
+        """
         print("%s[%sCRITICAL%s] : %s" % (
-            self.__get_time_field(), self.red, self.reset, msg
+            self.__get_time_field(), self._red, self._reset, msg
         ), file=self.stream, flush=flush)
         if exitcode != None:
             sys.exit(exitcode)
 
     def error(self, msg, flush=False):
+        """
+        [21:01:01][ERROR]    : `msg`
+
+        flush=True - flushes buffer
+        """
         print("%s[%sERROR%s]    : %s" % (
-            self.__get_time_field(), self.red, self.reset, msg
+            self.__get_time_field(), self._red, self._reset, msg
         ), file=self.stream, flush=flush)
 
 l = Logger()
@@ -72,10 +144,14 @@ class InterfaceArgs(NamedTuple):
     proc_hz: int
     perf_hz: int
     reconnect_timeout: int
+    verbose_logs: int
     batch_max: int
     event_queue_max: int
     proc_queue_max: int
     perf_queue_max: int
+    max_frame_bytes: int
+    socket_timeout_secs: int
+    send_queue_max_mb: int
 
 
 class ArgSpec(NamedTuple):
@@ -138,8 +214,18 @@ class InterfaceArgTable:
         value_type=int,
         description="Timeout before connection is tried again",
     )
-    
+
+    VERBOSE_LOGS = ArgSpec(
+        flag="-v",
+        field="verbose_logs",
+        env_var="BERGAMOT_INTERNAL_ARGS",
+        default=2,
+        value_type=int,
+        description="Verbose output (0 is no verbose output, max is 2)"
+    )
+
     ## Below additions don't have cmdline flags ##
+    # Note: the MBs are converted to bytes in `agent.pyx`
     
     BATCH_MAX_MB = ArgSpec(
         flag=None,
@@ -174,6 +260,35 @@ class InterfaceArgTable:
         description="Maximum size of performance monitor packets",
     )
 
+    ## Below additions don't have cmdline flags or env vars ##
+
+    MAX_FRAME_BYTES = ArgSpec(
+        flag=None,
+        field="max_frame_bytes",
+        env_var=None
+        default=1024*1024,
+        value_type=int,
+        description="Maximum size of frame",
+    )
+
+    SOCKET_TIMEOUT_SECS = ArgSpec(
+        flag=None,
+        field="socket_timeout_secs",
+        env_var=None,
+        default=5,
+        value_type=int,
+        description="Time before socket times out"
+    )
+
+    SEND_QUEUE_MAX_MB = ArgSpec(
+        flag=None,
+        field="send_queue_max",
+        env_var=None,
+        default=512,
+        value_type=int,
+        description="Maximum length of send buffer"
+    )
+
     ALL_OPTIONS = (
         HOST,
         PORT,
@@ -185,9 +300,14 @@ class InterfaceArgTable:
         EVENT_QUEUE_MAX_MB,
         PROC_QUEUE_MAX_MB,
         PERF_QUEUE_MAX_MB,
+        MAX_FRAME_BYTES,
+        SOCKET_TIMEOUT_SECS,
+        SEND_QUEUE_MAX_MB
     )
 
-    OPTIONS = tuple(spec for spec in ALL_OPTIONS if spec.flag)
+    _parse = lambda x: bool(x.flag or x.env_var)
+
+    OPTIONS = tuple(spec for spec in ALL_OPTIONS if _parse(spec))
 
     BY_FLAG = {spec.flag: spec for spec in OPTIONS}
 
@@ -265,6 +385,7 @@ def _build_help_msg(program_name):
     ]
 
     for spec in InterfaceArgTable.OPTIONS:
+        if spec
         lines.append(
             "    %-12s %s (default %s or %s)" % (
                 "%s <VAL>" % spec.flag,

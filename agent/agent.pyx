@@ -514,3 +514,82 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# OTRA VEZ
+
+"""
+Bergamot
+Agent
+
+(c) 2026
+Ingenuineintel
+(Roan Rothrock)
+<roan.rothrock@proton.me>
+"""
+
+# ── CYTHON CDEFS ─────────────────────────────────────────────────────────── #
+cdef str BERGAMOT_VER
+cdef object ARGS
+cdef str PROC_PATH
+cdef bool ENGINE_LOAD_ATTEMPTED
+cdef object EVENT_QUEUE
+cdef object PROC_QUEUE
+cdef object PERF_QUEUE
+cdef object SEND_QUEUE
+# ── END CYTHON CDEFS ───────────────────────────────────────────── #
+
+
+BERGAMOT_VER = "1.0"
+
+PROC_PATH = "/proc/bergamot-pipe" # Engine pipe entry
+ENGINE_LOAD_ATTEMPTED = False     # If the Agent has attempted to load the Engine
+
+# ── IMPORTS ──────────────────────────────────────────────────────────────── #
+from collections import deque
+import contextlib
+from dataclasses import dataclass
+import os
+import subprocess
+import sys
+import threading
+import time
+
+from interface import l, parse_interface_args
+from net import Sender
+from procurement import *
+import protocol
+# ── END IMPORTS ────────────────────────────────────────────────── #
+
+
+# ── ARGS ─────────────────────────────────────────────────────────────────── #
+ARGS = parse_interface_args()
+
+# Megabytes to Bytes
+ARGS.batch_max       *= 1024 * 1024
+ARGS.event_queue_max *= 1024 * 1024
+ARGS.proc_queue_max  *= 1024 * 1024
+ARGS.perf_queue_max  *= 1024 * 1024
+ARGS.send_queue_max  *= 1024 * 1024
+
+# boundaries
+if ARGS.event_hz <= 0:
+    l.warning(f"Event frequency being raised to 1 from {ARGS.event_hz} to prevent breakage.")
+    ARGS.event_hz = 1
+if ARGS.proc_hz <= 0:
+    l.warning(f"Proc frequnecy being raised to 1 from {ARGS.proc_hz} to prevent breakage.")
+    ARGS.proc_hz = 1
+if ARGS.perf_hz <= 0:
+    l.warning(f"Perf frequency being raised to 1 from {ARGS.perf_hz} to prevent breakage.")
+    ARGS.perf_hz = 1
+
+# logging verbosity
+l.verbosity(ARGS.verbose_logs)
+
+# ── END ARGS ───────────────────────────────────────────────────── #
+
+
+# ── QUEUES ───────────────────────────────────────────────────────────────── #
+EVENT_QUEUE = deque(maxlen=ARGS.event_queue_max)
+PROC_QUEUE  = deque(maxlen=ARGS.proc_queue_max)
+PERF_QUEUE  = deque(maxlen=ARGS.perf_queue_max)
+SEND_QUEUE  = deque(maxlen=ARGS.send_queue_max)

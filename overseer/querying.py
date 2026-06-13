@@ -90,8 +90,6 @@ class PastDataManager:
 
     def __init__(self, db_dir="db"):
 
-        # TODO RLock()
-
         # TODO I don't think that path calculations fit the scope of a class
         self.__base_dir: str = os.path.dirname(os.path.abspath(__file__))
         self.__db_dir:   str = os.path.join(self.__base_dir, db_dir)
@@ -324,38 +322,6 @@ class PastDataManager:
         """Gets listings of databases in a given directory."""
         pass
 
-
-# ── QUERYING SYSTEMS - LiveDataManager ───────────────────────────────────── #
-
-class LiveDataManager:
-    """
-    Connection and query manager for querying live databases.
-    """
-    def __init__(self, db: str):
-        # assuming `db` is a correct path
-        try:
-            self.__db = db
-            self.__conn: sqlite3.Connection = sqlite3.connect(self.__db)
-            self.__cursor = self.__conn.cursor()
-        except sqlite3.OperationalError as e:
-            raise DatabaseManagementError(e)
-
-    def __fetchone(self, cmd: str, params: dict | None = None) -> tuple:
-        return self.__cursor.execute(cmd, params).fetchone()
-    
-    def __fetchall(self, cmd: str, params: dict | None = None) -> list[tuple]:
-        return self.__cursor.execute(cmd, params).fetchall()
-
-
-    def getperf(self) -> list:
-        return self.__fetchall(sql.getcpu_live)
-
-    def geteps(self) -> :
-        return self.__fetc
-
-    # TODO
-
-
 # ── DATABASE POPULATING ──────────────────────────────────────────────────── #
 
 class DataPopulator:
@@ -369,6 +335,7 @@ class DataPopulator:
             self.__db = db
             self.__conn = sqlite3.connect(self.__db)
             self.__cursor = self.__conn.cursor()
+            # FIXME params
             self.__cursor.execute(sql.initdb)
         except sqlite3.OperationalError as e:
             del self
@@ -377,11 +344,19 @@ class DataPopulator:
     def __ins_row(self, row: EvntRow | ProcRow | PerfRow):
         pass # TODO
 
-    def __cast_row(self, row: str) -> EvntRow | ProcRow | PerfRow:
-        """Takes a row and 'casts' it into a *Row class."""
-        pass # TODO
+    def cast(self, row: EvntRow | ProcSnapshot | PerfRow | SystemInfo) -> dict:
+        if isinstance(row, EvntRow) or isinstance(row, SystemInfo):
+            return row.__dict__
+        elif isinstance(row, ProcSnapshot):
+            ret = row.__dict__
+            # TODO
+            return ret
+        elif isinstance(row, PerfRow):
+            pass # TODO
+        else:
+            return {}
 
-    def process_row(self, row: str) -> None:
+    def process_row(self, row: bytes) -> None:
         """Parses decompiled rows and inserts it into the database.
         Failures throw DataPopulationErrors.
         """

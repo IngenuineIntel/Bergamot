@@ -115,6 +115,8 @@ cdef bytes _genflags(int kind, int data_len, int compressed_len):
     if compressed_len > 0xFFF:
         compressed_len = 1
 
+    # TODO comment about the bitpacking
+
     packed = (
         ((1 - 1) & 0xF)
         | ((0 & 0xF) << 4)
