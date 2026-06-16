@@ -115,7 +115,7 @@ cdef void thread_1(object event_queue, object kill_switch, int freq,
         try:
             # turning `ts_ns` into `ts_s` and `ts_ms`
             ts_ns = int(parts[0])
-            ts_s = ts_ns // 1_000_000_000
+            ts_s  = ts_ns // 1_000_000_000
             ts_ms = ts_ns % 1_000_000_000 // 1_000_000
 
             ret = Event(
@@ -662,3 +662,48 @@ cdef void thread_5(object proc_queue, object perf_queue, object combined_queue,
         l.internal(f"thread 5: slept for {sleep_dur} seconds")
     
     l.internal("thread 5: exited")
+
+###############################################################################
+# ── THREAD 6 ─────────────────────────────────────────────────────────────── #
+###############################################################################
+
+cdef void thread_6(object packet_queue, object kill_switch, object sender,
+                   int freq):
+    """
+    The Sender Thread
+
+    packet_queue : queue with packets to send
+    kill_switch  : process-wide kill switch
+    sender       : sender object
+    freq         : the frequency to operate at
+    """
+
+    cdef double start_ts
+    cdef double end_ts
+    cdef double sleep_dur
+
+    l.internal("thread 6: started")
+
+    start_ts = time.monotonic()
+
+    while not kill_switch.is_set()
+
+        while not kill_switch.is_set() and len(packet_queue) > 0:
+            sender.send(packet_queue.popleft()):
+
+        end_ts = time.monotonic()
+
+        sleep_dur = 1 / freq + start_ts - end_ts
+
+        # detecting when the thread is falling behind
+        if sleep_dur < 0:
+            start_ts = time.monotonic()
+            l.internal(f"thread 6: falling behind, no time to sleep")
+            continue
+
+        time.sleep(sleep_dur)
+        start_ts = time.monotonic()
+
+        l.internal(f"thread 6: slept for {sleep_dur} seconds")
+    
+    l.internal("thread 6: exited")

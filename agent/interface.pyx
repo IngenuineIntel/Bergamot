@@ -218,11 +218,22 @@ class InterfaceArgTable:
         value_type=int,
         description="Verbose output (0 is no verbose output, max is 2)"
     )
+
     # TODO -vf options to put internal logs in file
 
     ## Below additions don't have cmdline flags ##
     # Note: the MBs are converted to bytes in `agent.pyx`
     
+    PACKET_MAX_MB = ArgSpec(
+        flag=None,
+        field="packet_max",
+        env_var="BERGAMOT_PACKET_MAX",
+        default=12,
+        value_type=int,
+        description="Maximum size of outgoing packets"
+    )
+
+    # TODO make this mean something
     BATCH_MAX_MB = ArgSpec(
         flag=None,
         field="batch_max",
@@ -256,8 +267,6 @@ class InterfaceArgTable:
         description="Maximum size of performance monitor packets",
     )
 
-    ## Below additions don't have cmdline flags or env vars ##
-
     ALL_OPTIONS = (
         HOST,
         PORT,
@@ -269,7 +278,6 @@ class InterfaceArgTable:
         EVENT_PACKET_MAX_MB,
         PROC_PACKET_MAX_MB,
         PERF_PACKET_MAX_MB,
-        SOCKET_TIMEOUT_SECS,
     )
 
     _parse = lambda x: bool(x.flag or x.env_var)
@@ -368,6 +376,8 @@ def _build_help_msg(program_name):
 
 
 help_msg = _build_help_msg(sys.argv[0])
+
+__all__ = ["parse_interface_args", "l"]
 
 if __name__ == "__main__":
     l.critical("Sir...")

@@ -67,6 +67,8 @@ Performance Packets
 
 # wire protocol version
 WIRE_VERSION_STR = "1.0"
+WIRE_VERSION_MAJOR = 1
+WIRE_VERSION_MINOR = 0
 
 # each kind of frame has its own identifying integer
 FRAME_SYSINFO = 0
@@ -218,13 +220,13 @@ cdef bytes _genflags(int kind, int data_len, int compressed_len):
         compressed_len = 1
 
     packed = (
-        ((1 - 1) & 0xF)
-        | ((0 & 0xF) << 4)
-        | ((COMP_DEFLATE & 0x3) << 8)
-        | ((COMPRESSION_LEVEL - 1) << 10)
-        | ((kind & 0x7) << 13)
-        | ((data_len - 1) << 16)
-        | ((compressed_len - 1) << 28)
+        ((WIRE_VERSION_MAJOR - 1) & 0b1111)
+        | ((WIRE_VERSION_MINOR & 0b1111) << 4)
+        | ((COMP_DEFLATE & 0b11) << 8)
+        | (((COMPRESSION_LEVEL - 1) & 0b111) << 10)
+        | ((kind & 0b111) << 13)
+        | (((data_len - 1) & 0b111111111111) << 16)
+        | (((compressed_len - 1) & 0b111111111111) << 28)
     )
 
     return packed.to_bytes(5, "big") + MASK.to_bytes(4, "big") + FIELD_DELIM + ROW_DELIM

@@ -46,7 +46,7 @@ cdef class Sender:
     """
 
     def __init__(self, str host, int port, int reconnect_max=30,
-                 int max_frame_sz=1024*1024, int socket_timeout=5):
+                 int max_frame_sz=12, int socket_timeout=5):
         # Quick!
         self.__l = RLock() # the door!
 
@@ -54,7 +54,7 @@ cdef class Sender:
         self.__port = port
         
         self.__reconnect_max_seconds = reconnect_max
-        self.__max_frame_sz = max_frame_sz
+        self.__max_frame_sz = max_frame_sz * 1024 * 1024 # MB conversion
         self.__socket_timeout = max(1, socket_timeout)
 
         self.__sock = None
@@ -107,25 +107,19 @@ cdef class Sender:
         with contextlib.suppress(OSError):
             self.__sock.close()
 
-    cdef bool __send(self, object data):
-        cdef bytes frame
-
-        if isinstance(data, SystemInfo):
-            frame = gen_system_info(data)
-        elif isinstance(data, Event):
-            frame = gen_event([data])
-        elif isinstance(data, ProcSnapshot):
-            frame = gen_proc_snapshot(data)
-        elif isinstance(data, Perf):
-            frame = gen_perf(data)
-        else:
-            return False
+    cdef bool __send(self, bytes data):
+        
+        if len(data) > self.__max_frame_sz:
+            l.warning("packet cannot be sent as it is oversized, skipping")
+            l.debug(
+                f"max packet size is configured at {self.__max_frame_sz} bytes, but the packet is {len(data)} bytes"
+            )
 
         try:
             self.__sock.sendall(frame)
             return True
         except OSError as e:
-            l.error(f"Send error: {e}", flush=True)
+            l.error(f"send error: {e}", flush=True)
             return False
 
     # wrapprs
@@ -140,9 +134,10 @@ cdef class Sender:
             while True:
                 if self.__connect():
                     return True
-                l.critical(f"Connection failed, retrying in {backoff}s...")
+                l.critical(f"connection failed, retrying in {backoff}s...")
                 time.sleep(backoff)
                 backoff = backoff_calc(backoff, self.__reconnect_max_seconds)
+        l.info("connection successful")
 
     def close(self):
         """Attempts disconnection, deletes `self`, can't fail."""
@@ -151,7 +146,7 @@ cdef class Sender:
                 self.__close()
         del self
 
-    cpdef bool send(self, object data):
+    cpdef bool send(self, bytes data):
         """Creates frame from `data` and sends it, True/False on success."""
         if not self.__sock:
             return False
