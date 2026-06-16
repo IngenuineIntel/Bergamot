@@ -30,3 +30,7 @@ __freeze_entry__.py
 
 # old files (keeping them handy as references)
 overseer/old
+overseer-old/
+
+# bergamot-dump clutter
+utils/bergamot-dump/go.sum

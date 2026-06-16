@@ -141,7 +141,6 @@ def thread_1(object event_queue, object kill_switch, int freq,
         return ret
 
 
-    # TODO make inline instead of like this
     def reload_engine():
         """
         Reloads engine if need be

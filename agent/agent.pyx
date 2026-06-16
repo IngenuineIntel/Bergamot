@@ -55,8 +55,8 @@ from workers import (
 ARGS = parse_interface_args()
 
 # Megabytes to Bytes
-ARGS.batch_max       *= 1024 * 1024
-ARGS.packet_max      *= 1024 * 1024
+ARGS.batch_max  *= 1024 * 1024
+ARGS.packet_max *= 1024 * 1024
 
 # boundaries
 if ARGS.event_hz <= 0:
