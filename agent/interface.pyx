@@ -14,9 +14,9 @@ cdef class Logger:
     """
     Universal logging
 
-    [21:01:01:355314][INTERNAL]: This is an extremely verbose log, like a thread exiting
+    [21:01:01:355314][INTERNAL]: This is an extremely verbose log, like a thread sleeping
     [21:01:01][DEBUG]    : This is a simple debug, like the most likely reason for a problem
-    [21:01:01][INFO]     : Something happened successfully.
+    [21:01:01][INFO]     : Something happened successfully
     [21:01:01][WARNING]  : Minor mishap, non-fatal
     [21:01:01][CRITICAL] : Major mishap, likely fatal
     [21:01:01][ERROR]    : The error that indicates the mishap
@@ -151,7 +151,7 @@ class InterfaceArgs(NamedTuple):
     perf_queue_max: int
     max_frame_bytes: int
     socket_timeout_secs: int
-    send_queue_max_mb: int
+    send_queue_max: int
 
 
 class ArgSpec(NamedTuple):
@@ -223,6 +223,7 @@ class InterfaceArgTable:
         value_type=int,
         description="Verbose output (0 is no verbose output, max is 2)"
     )
+    # TODO -vf options to put internal logs in file
 
     ## Below additions don't have cmdline flags ##
     # Note: the MBs are converted to bytes in `agent.pyx`
@@ -235,7 +236,7 @@ class InterfaceArgTable:
         value_type=int,
         description="Maximum size of read batch from the Engine",
     )
-    EVENT_QUEUE_MAX_MB = ArgSpec(
+    EVENT_PACKET_MAX_MB = ArgSpec(
         flag=None,
         field="event_queue_max",
         env_var="BERGAMOT_EVENT_QUEUE_MAX",
@@ -243,7 +244,7 @@ class InterfaceArgTable:
         value_type=int,
         description="Maximum size of event capture packets",
     )
-    PROC_QUEUE_MAX_MB = ArgSpec(
+    PROC_PACKET_MAX_MB = ArgSpec(
         flag=None,
         field="proc_queue_max",
         env_var="BERGAMOT_SNAPSHOT_QUEUE_MAX",
@@ -251,7 +252,7 @@ class InterfaceArgTable:
         value_type=int,
         description="Maximum size of process snapshot packets",
     )
-    PERF_QUEUE_MAX_MB = ArgSpec(
+    PERF_PACKET_MAX_MB = ArgSpec(
         flag=None,
         field="perf_queue_max",
         env_var="BERGAMOT_PERF_QUEUE_MAX",
@@ -262,15 +263,6 @@ class InterfaceArgTable:
 
     ## Below additions don't have cmdline flags or env vars ##
 
-    MAX_FRAME_BYTES = ArgSpec(
-        flag=None,
-        field="max_frame_bytes",
-        env_var=None
-        default=1024*1024,
-        value_type=int,
-        description="Maximum size of frame",
-    )
-
     SOCKET_TIMEOUT_SECS = ArgSpec(
         flag=None,
         field="socket_timeout_secs",
@@ -278,15 +270,6 @@ class InterfaceArgTable:
         default=5,
         value_type=int,
         description="Time before socket times out"
-    )
-
-    SEND_QUEUE_MAX_MB = ArgSpec(
-        flag=None,
-        field="send_queue_max",
-        env_var=None,
-        default=512,
-        value_type=int,
-        description="Maximum length of send buffer"
     )
 
     ALL_OPTIONS = (
@@ -297,12 +280,10 @@ class InterfaceArgTable:
         PERF_HZ,
         RECONNECT_TIMEOUT,
         BATCH_MAX_MB,
-        EVENT_QUEUE_MAX_MB,
-        PROC_QUEUE_MAX_MB,
-        PERF_QUEUE_MAX_MB,
-        MAX_FRAME_BYTES,
+        EVENT_PACKET_MAX_MB,
+        PROC_PACKET_MAX_MB,
+        PERF_PACKET_MAX_MB,
         SOCKET_TIMEOUT_SECS,
-        SEND_QUEUE_MAX_MB
     )
 
     _parse = lambda x: bool(x.flag or x.env_var)
