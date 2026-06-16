@@ -165,22 +165,21 @@ cdef bytes _encode_field(object value):
     if value is None or value == "" or value == b"":
         value = " "
 
-    match type(value):
-        case bytes:
-            ret = value
-            ret = ret.replace(FIELD_DELIM, b" ")
-            ret = ret.replace(ROW_DELIM, b" ")
-        case str:
-            ret = value.encode("utf-8", errors="replace")
-            ret = ret.replace(FIELD_DELIM, b" ")
-            ret = ret.replace(ROW_DELIM, b" ")
-        case int:
-            ret = str(int).encode("utf-8", errors="replace")
-        case float:
-            # preventing scientific representation
-            ret = f"{a:.5f}".encode("utf-8", errors="replace")
-        case _:
-            ret = b""
+    if type(value) is bytes:
+        ret = value
+        ret = ret.replace(FIELD_DELIM, b" ")
+        ret = ret.replace(ROW_DELIM, b" ")
+    elif type(value) is str:
+        ret = value.encode("utf-8", errors="replace")
+        ret = ret.replace(FIELD_DELIM, b" ")
+        ret = ret.replace(ROW_DELIM, b" ")
+    elif type(value) is int:
+        ret = str(int).encode("utf-8", errors="replace")
+    elif type(value) is float:
+        # preventing scientific representation
+        ret = f"{value:.5f}".encode("utf-8", errors="replace")
+    else:
+        ret = b""
 
     return ret + FIELD_DELIM
 
@@ -189,14 +188,13 @@ cdef bytes _compress(bytes data):
     """
     Compresses data and XORs it
     """
-    cdef bytes compressed
+    cdef bytearray compressed
     cdef Py_ssize_t i
 
-    match COMPRESSION_ALGORITHM:
-        case COMP_DEFLATE:
-            compressed = zlib.compress(data, level=COMPRESSION_LEVEL)
-        case _:
-            return b""
+    if COMPRESSION_ALGORITHM == COMP_DEFLATE:
+        compressed = zlib.compress(data, level=COMPRESSION_LEVEL)
+    else:
+        return b""
 
     for i in range(len(compressed)):
         compressed[i] ^= MASK
@@ -317,7 +315,7 @@ cdef bytes _compile_perf(object obj):
     return data
 
 
-cdef bytes gen_system_info(object obj):
+cpdef bytes gen_system_info(object obj):
     """
     Generates full packet from SystemInfo object
     """
@@ -329,7 +327,7 @@ cdef bytes gen_system_info(object obj):
     return MAGIC + _genflags(FRAME_SYSINFO, len(body), len(compressed)) + compressed
 
 
-cdef bytes gen_event(list objs):
+cpdef bytes gen_event(list objs):
     """
     Generates full packet from a list of Event objects
     """
@@ -341,7 +339,7 @@ cdef bytes gen_event(list objs):
     return MAGIC + _genflags(FRAME_EVENT, len(body), len(compressed)) + compressed
 
 
-cdef bytes gen_proc_snapshot(object obj):
+cpdef bytes gen_proc_snapshot(object obj):
     """
     Generates full packet from a ProcSnapshot object
     """
@@ -353,7 +351,7 @@ cdef bytes gen_proc_snapshot(object obj):
     return MAGIC + _genflags(FRAME_PROCS, len(body), len(compressed)) + compressed
 
 
-cdef bytes gen_perf(object obj):
+cpdef bytes gen_perf(object obj):
     """
     Generates full packet from a Perf object
     """

@@ -38,19 +38,22 @@ Sends all packets in the packet deque at a specified frequency
 """
 
 import contextlib
+import os
 import subprocess
 import sys
 import time
 
 from interface import l
-from protocol import SystemInfo, Event, ProcSnapshot, Perf
-
+from protocol import (
+    SystemInfo, Event, Proc, ProcSnapshot, Perf,
+    gen_system_info, gen_event, gen_proc_snapshot, gen_perf
+)
 
 ###############################################################################
 # ── THREAD 1 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_1(object event_queue, object kill_switch, int freq,
+def thread_1(object event_queue, object kill_switch, int freq,
                    object overview_fn, str proc_path):
     """
     The Event Thread
@@ -73,13 +76,13 @@ cdef void thread_1(object event_queue, object kill_switch, int freq,
     cdef bool annouced
     cdef bool tried_engine_load
 
-    cdef int sleep_dur
+    cdef double sleep_dur
 
     announced         = False
     tried_engine_load = False
 
 
-    cdef Event parse_line(str line):
+    def parse_line(str line):
         """
         Parses one procfile line into <Event>, or None if the line was invalid
 
@@ -139,7 +142,7 @@ cdef void thread_1(object event_queue, object kill_switch, int freq,
 
 
     # TODO make inline instead of like this
-    cdef bool reload_engine():
+    def reload_engine():
         """
         Reloads engine if need be
         """
@@ -152,7 +155,7 @@ cdef void thread_1(object event_queue, object kill_switch, int freq,
         rm_cmd  = "rmmod bergamot_engine"
         ins_cmd = "modprobe bergamot_engine"
         
-        rm = subproces.run(
+        rm = subprocess.run(
             rm_cmd.split(" "),
             capture_output=True,
             text=True,
@@ -273,7 +276,7 @@ cdef void thread_1(object event_queue, object kill_switch, int freq,
 # ── THREAD 2 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_2(object proc_queue, object kill_switch, int freq):
+def thread_2(object proc_queue, object kill_switch, int freq):
     """
     The Proc Thread
 
@@ -317,7 +320,7 @@ cdef void thread_2(object proc_queue, object kill_switch, int freq):
 
     start_ts = time.monotonic()
 
-    while not kill_switch.is_set()
+    while not kill_switch.is_set():
 
         now = time.time()
         ts_s = int(now)
@@ -339,7 +342,7 @@ cdef void thread_2(object proc_queue, object kill_switch, int freq):
 
             try:
                 with open(status_path, "r", encoding="utf-8", errors="replace") as fd:
-                    for ln in fd:
+                    for line in fd:
 
                         # comm
                         if (not got_name) and line.startswith("Name:\t"):
@@ -429,7 +432,7 @@ cdef void thread_2(object proc_queue, object kill_switch, int freq):
 # ── THREAD 3 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_3(object perf_queue, object kill_switch, int freq):
+def thread_3(object perf_queue, object kill_switch, int freq):
     """
     The Perf Thread
     
@@ -468,10 +471,10 @@ cdef void thread_3(object perf_queue, object kill_switch, int freq):
             with open("/proc/stat", "r") as fd:
                 for ln in fd:
 
-                    if not line.startswith("cpu"):
+                    if not ln.startswith("cpu"):
                         continue 
                     
-                    parts = line.split()
+                    parts = ln.split()
                     if len(parts) < 8 or not parts[0][3:].isdigit():
                         continue
 
@@ -483,11 +486,11 @@ cdef void thread_3(object perf_queue, object kill_switch, int freq):
         # RAM
         found_mem = 0
         try:
-            with open("/proc/meminfo". "r"): as fd:
+            with open("/proc/meminfo", "r") as fd:
                 for ln in fd:
-                    key = line.split(":")[0]
+                    key = ln.split(":")[0]
                     if key in mem_fields:
-                        mem_fields[key] = int(line.split()[1])
+                        mem_fields[key] = int(ln.split()[1])
                         found_mem += 1
                         if found_mem >= 4:
                             break
@@ -515,7 +518,7 @@ cdef void thread_3(object perf_queue, object kill_switch, int freq):
             with open("/porc/loadavg", "r") as fd:
                 parts = fd.read().split()
                 if len(parts) >= 3:
-                    ret.load_1m, ret.load_5m, ret.load_15m = float(parts[0], float(parts[1]), float[parts[2]])
+                    ret.load_1m, ret.load_5m, ret.load_15m = float(parts[0]), float(parts[1]), float(parts[2])
         except OSError:
             pass
 
@@ -544,8 +547,8 @@ cdef void thread_3(object perf_queue, object kill_switch, int freq):
 # ── THREAD 4 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_4(object event_queue, object packet_queue,
-                   object kill_switch int freq=2):
+def thread_4(object event_queue, object packet_queue,
+                   object kill_switch, int freq=2):
     """
     The Event Loading Thread
 
@@ -574,7 +577,7 @@ cdef void thread_4(object event_queue, object packet_queue,
 
             if isinstance(i, Event):
                 j.append(i)
-            elif isinstance(i, SystemOverview):
+            elif isinstance(i, SystemInfo):
                 # completely event packet, create overview packet, return to
                 # making event packet
 
@@ -609,7 +612,7 @@ cdef void thread_4(object event_queue, object packet_queue,
 # ── THREAD 5 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_5(object proc_queue, object perf_queue, object combined_queue,
+def thread_5(object proc_queue, object perf_queue, object combined_queue,
                    object kill_switch, int freq=1):
     """
     Proc/Perf Loading Thread
@@ -642,7 +645,7 @@ cdef void thread_5(object proc_queue, object perf_queue, object combined_queue,
             i = proc_queue.popleft()
             combined_queue.append(gen_proc_snapshot(i))
 
-        while (len_proc_queue) > 0 and not kill_switch.is_set():
+        while len(perf_queue) > 0 and not kill_switch.is_set():
             i = perf_queue.popleft()
             combined_queue.append(gen_perf(i))
 
@@ -667,7 +670,7 @@ cdef void thread_5(object proc_queue, object perf_queue, object combined_queue,
 # ── THREAD 6 ─────────────────────────────────────────────────────────────── #
 ###############################################################################
 
-cdef void thread_6(object packet_queue, object kill_switch, object sender,
+def thread_6(object packet_queue, object kill_switch, object sender,
                    int freq):
     """
     The Sender Thread
@@ -686,10 +689,10 @@ cdef void thread_6(object packet_queue, object kill_switch, object sender,
 
     start_ts = time.monotonic()
 
-    while not kill_switch.is_set()
+    while not kill_switch.is_set():
 
         while not kill_switch.is_set() and len(packet_queue) > 0:
-            sender.send(packet_queue.popleft()):
+            sender.send(packet_queue.popleft())
 
         end_ts = time.monotonic()
 

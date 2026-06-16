@@ -6,3 +6,4 @@ freeze-core>=0.6.1
 packaging>=26.2
 patchelf>=0.17.2.4
 setuptools>=82.0.1
+pyinstaller>=6.15.0

@@ -56,10 +56,7 @@ ARGS = parse_interface_args()
 
 # Megabytes to Bytes
 ARGS.batch_max       *= 1024 * 1024
-ARGS.event_queue_max *= 1024 * 1024
-ARGS.proc_queue_max  *= 1024 * 1024
-ARGS.perf_queue_max  *= 1024 * 1024
-ARGS.send_queue_max  *= 1024 * 1024
+ARGS.packet_max      *= 1024 * 1024
 
 # boundaries
 if ARGS.event_hz <= 0:
@@ -84,7 +81,7 @@ l.verbosity(ARGS.verbose_logs)
 EVENT_QUEUE   = deque(maxlen=ARGS.event_queue_max)
 PROC_QUEUE    = deque(maxlen=ARGS.proc_queue_max)
 PERF_QUEUE    = deque(maxlen=ARGS.perf_queue_max)
-PACKET_QUEUE  = deque(maxlen=ARGS.send_queue_max)
+PACKET_QUEUE  = deque(maxlen=ARGS.packet_max)
 
 
 # ── END QUEUES ─────────────────────────────────────────────────── #

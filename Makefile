@@ -47,7 +47,7 @@ agent_freeze: agent_prep_env
 	-rm -rf $(AGENT_DIR)/build/pyi-build
 	-rm -rf $(AGENT_DIR)/build/pyi-spec
 	-rm -f ./bergamot-agent
-	cd $(AGENT_DIR) && $(AGENT_PYTHON) -m PyInstaller --onefile --clean --name bergamot-agent --distpath .. --workpath build/pyi-build --specpath build/pyi-spec --additional-hooks-dir ../pyinstaller_hooks --hidden-import interface --hidden-import workers --hidden-import protocol --hidden-import net --hidden-import procurement --hidden-import queue --hidden-import contextlib --hidden-import dataclasses --hidden-import threading --hidden-import platform --hidden-import socket --hidden-import struct --hidden-import zlib --hidden-import datetime --hidden-import typing --hidden-import os --hidden-import sys --hidden-import time --hidden-import signal __freeze_entry__.py
+	cd $(AGENT_DIR) && env/bin/pyinstaller --onefile --clean --name bergamot-agent --distpath .. --workpath build/pyi-build --specpath build/pyi-spec --additional-hooks-dir ../pyinstaller_hooks --hidden-import interface --hidden-import workers --hidden-import protocol --hidden-import net --hidden-import procurement --hidden-import queue --hidden-import contextlib --hidden-import dataclasses --hidden-import threading --hidden-import platform --hidden-import socket --hidden-import struct --hidden-import zlib --hidden-import datetime --hidden-import typing --hidden-import os --hidden-import sys --hidden-import time --hidden-import signal __freeze_entry__.py
 	chmod +x ./bergamot-agent
 	-rm -f $(AGENT_DIR)/__freeze_entry__.py
 

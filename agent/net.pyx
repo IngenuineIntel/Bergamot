@@ -114,9 +114,10 @@ cdef class Sender:
             l.debug(
                 f"max packet size is configured at {self.__max_frame_sz} bytes, but the packet is {len(data)} bytes"
             )
+            return False
 
         try:
-            self.__sock.sendall(frame)
+            self.__sock.sendall(data)
             return True
         except OSError as e:
             l.error(f"send error: {e}", flush=True)

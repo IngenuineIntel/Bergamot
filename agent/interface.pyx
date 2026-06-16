@@ -242,29 +242,29 @@ class InterfaceArgTable:
         value_type=int,
         description="Maximum size of read batch from the Engine",
     )
-    EVENT_PACKET_MAX_MB = ArgSpec(
+    EVENT_PACKET_MAX = ArgSpec(
         flag=None,
         field="event_queue_max",
         env_var="BERGAMOT_EVENT_QUEUE_MAX",
         default=64,
         value_type=int,
-        description="Maximum size of event capture packets",
+        description="Maximum index size of event capture packets",
     )
-    PROC_PACKET_MAX_MB = ArgSpec(
+    PROC_PACKET_MAX = ArgSpec(
         flag=None,
         field="proc_queue_max",
         env_var="BERGAMOT_SNAPSHOT_QUEUE_MAX",
         default=8,
         value_type=int,
-        description="Maximum size of process snapshot packets",
+        description="Maximum index size of process snapshot packets",
     )
-    PERF_PACKET_MAX_MB = ArgSpec(
+    PERF_PACKET_MAX = ArgSpec(
         flag=None,
         field="perf_queue_max",
         env_var="BERGAMOT_PERF_QUEUE_MAX",
         default=6,
         value_type=int,
-        description="Maximum size of performance monitor packets",
+        description="Maximum index size of performance monitor packets",
     )
 
     ALL_OPTIONS = (
@@ -274,15 +274,15 @@ class InterfaceArgTable:
         SNAPSHOT_HZ,
         PERF_HZ,
         RECONNECT_TIMEOUT,
+        VERBOSE_LOGS,
+        PACKET_MAX_MB,
         BATCH_MAX_MB,
-        EVENT_PACKET_MAX_MB,
-        PROC_PACKET_MAX_MB,
-        PERF_PACKET_MAX_MB,
+        EVENT_PACKET_MAX,
+        PROC_PACKET_MAX,
+        PERF_PACKET_MAX,
     )
 
-    _parse = lambda x: bool(x.flag or x.env_var)
-
-    OPTIONS = tuple(spec for spec in ALL_OPTIONS if _parse(spec))
+    OPTIONS = tuple(spec for spec in ALL_OPTIONS if bool(spec.flag or spec.env_var))
 
     BY_FLAG = {spec.flag: spec for spec in OPTIONS}
 
@@ -356,21 +356,24 @@ def _build_help_msg(program_name):
     lines = [
         "USAGE: %s [FLAGS/VALS]" % program_name,
         "",
-        "Flags:",
+        " Flag         Environment Variable        Default Value        Description",
     ]
 
     for spec in InterfaceArgTable.OPTIONS:
-        if spec
+        flag = "%s <VAL>" % spec.flag if spec.flag != None else ""
+        envv = "%s" % spec.env_var if spec.env_var != None else ""
+        dflt = "%s" % spec.default
+        dscr = "%s" % spec.description
         lines.append(
-            "    %-12s %s (default %s or %s)" % (
-                "%s <VAL>" % spec.flag,
-                spec.description,
-                spec.env_var,
-                spec.default,
+            " %s%s%s%s" % (
+                flag.ljust(13, " "),
+                envv.ljust(28, " "),
+                dflt.ljust(21, " "),
+                dscr
             )
         )
 
-    lines.append("    -h             Prints this message")
+    lines.append(" -h".ljust(60) + "Prints this message")
     return "\n".join(lines)
 
 
