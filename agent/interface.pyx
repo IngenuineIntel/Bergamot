@@ -373,7 +373,7 @@ def _build_help_msg(program_name):
             )
         )
 
-    lines.append(" -h".ljust(60) + "Prints this message")
+    lines.append(" -h".ljust(63) + "Prints this message")
     return "\n".join(lines)
 
 
