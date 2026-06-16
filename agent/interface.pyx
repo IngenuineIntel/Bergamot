@@ -137,21 +137,16 @@ cdef class Logger:
 l = Logger()
 
 
-class InterfaceArgs(NamedTuple):
-    host: str
-    port: int
-    event_hz: int
-    proc_hz: int
-    perf_hz: int
-    reconnect_timeout: int
-    verbose_logs: int
-    batch_max: int
-    event_queue_max: int
-    proc_queue_max: int
-    perf_queue_max: int
-    max_frame_bytes: int
-    socket_timeout_secs: int
-    send_queue_max: int
+class InterfaceArgs:
+    """
+    Convenient way to transport arguments
+    """
+
+    def __init__(self, **kwargs):
+        self.__args = kwargs
+    
+    def __getattr__(self, attr):
+        return self.__args[attr]
 
 
 class ArgSpec(NamedTuple):
@@ -262,15 +257,6 @@ class InterfaceArgTable:
     )
 
     ## Below additions don't have cmdline flags or env vars ##
-
-    SOCKET_TIMEOUT_SECS = ArgSpec(
-        flag=None,
-        field="socket_timeout_secs",
-        env_var=None,
-        default=5,
-        value_type=int,
-        description="Time before socket times out"
-    )
 
     ALL_OPTIONS = (
         HOST,
