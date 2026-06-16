@@ -58,7 +58,6 @@ cdef class Sender:
         self.__socket_timeout = max(1, socket_timeout)
 
         self.__sock = None
-        self.connect()
 
         # how backoffs (the time between retries in the event of a failed connection)
         # are are calculated. It is called iteratively.
@@ -107,7 +106,7 @@ cdef class Sender:
         with contextlib.suppress(OSError):
             self.__sock.close()
 
-    cdef bool __send(self, bytes data):
+    def __send(self, bytes data) -> bool:
         
         if len(data) > self.__max_frame_sz:
             l.warning("packet cannot be sent as it is oversized, skipping")
@@ -124,7 +123,7 @@ cdef class Sender:
             return False
 
     # wrapprs
-    cdef bool connect(self):
+    def connect(self) -> bool:
         """Attempts connection in saecula saeculorum"""
         cdef int backoff = 1
         cdef int inter_backoff
@@ -140,14 +139,14 @@ cdef class Sender:
                 backoff = backoff_calc(backoff, self.__reconnect_max_seconds)
         l.info("connection successful")
 
-    def close(self):
+    def close(self) -> None:
         """Attempts disconnection, deletes `self`, can't fail."""
         if self.__sock:
             with self.__l:
                 self.__close()
         del self
 
-    cpdef bool send(self, bytes data):
+    def send(self, bytes data) -> bool:
         """Creates frame from `data` and sends it, True/False on success."""
         if not self.__sock:
             return False

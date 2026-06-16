@@ -1,16 +1,11 @@
 # interface.pyx
-"""
-I have written similar code to this like a dozen times,
-so I decided to put it in a gist in order to save my
-future self time.
-"""
+
 from datetime import datetime
 import os
 import sys
 from typing import NamedTuple
 
 cdef class Logger:
-
     """
     Universal logging
 

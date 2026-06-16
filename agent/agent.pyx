@@ -135,6 +135,7 @@ def _main():
         reconnect_max=ARGS.reconnect_timeout,
         max_frame_sz=ARGS.packet_max
     )
+    l.internal(sender)
 
     # await connection
     sender.connect()
