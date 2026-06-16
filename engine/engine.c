@@ -452,11 +452,9 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
    * format the kfifo directly into the user buffer. Non-owners get 0
    * bytes, identical to an empty file.
    *
-  * Procfs line contract emitted to Under-Seer:
-  *   <ts_ns>\t<pid>\t<ppid>\t<uid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\t<retval>\n
+   * Procfs line contract emitted:
+   *   <ts_ns>\t<pid>\t<type>\t<subtype>\t<comm>\t<arg1>\t<arg2>\t<retval>\n
    *
-   * Under-Seer maps these fields into JSON keys:
-  *   ts_s, ts_ms, pid, ppid, uid, type, subtype, comm, arg, arg1, arg2, retval
    */
 
   struct as_event ev;
@@ -477,12 +475,28 @@ static ssize_t as_proc_read(struct file *file, char __user *ubuf,
     }
     spin_unlock_irqrestore(&as_fifo_lock, flags);
 
-    len = snprintf(line, sizeof(line), "%llu\t%d\t%d\t%u\t%s\t%s\t%s\t%s\t%s\t%ld\n",
-                   (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
+    // old code
+    //len = snprintf(line, sizeof(line), "%llu\t%d\t%d\t%u\t%s\t%s\t%s\t%s\t%s\t%ld\n",
+    //               (unsigned long long)ev.timestamp_ns, ev.pid, ev.ppid, ev.uid,
+    //               (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
+    //                   ? as_type_str[ev.type]
+    //                   : "unknown",
+    //         ev.subtype, ev.comm, ev.arg, ev.arg2, ev.retval);
+    // this code isn't usable because it contiains PPID and UID data in the 
+    // lines of the procfile, which the Agent no longer supports
+
+    // new code
+    len = snprintf(line, sizeof(line), "%llu\t%d\t%s\t%s\t%s\t%s\t%s\t%ld\n",
+                   (unsigned long long)ev.timestamp_ns, ev.pid,
                    (ev.type < ARRAY_SIZE(as_type_str) && as_type_str[ev.type])
                        ? as_type_str[ev.type]
                        : "unknown",
-             ev.subtype, ev.comm, ev.arg, ev.arg2, ev.retval);
+                   ev.subtype,
+                   ev.comm,
+                   ev.arg,
+                   ev.arg2,
+                   ev.retval);
+    
 
     if (len <= 0)
       continue;
